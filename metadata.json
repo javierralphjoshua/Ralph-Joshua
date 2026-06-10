@@ -1,0 +1,6 @@
+{
+  "name": "Ragnar's 30 Days Challenge",
+  "description": "\"Fat Loss Is Just Math\" - Calculate daily calorie deficit with metabolic precision. Mathematically guaranteed fat loss tracker.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
