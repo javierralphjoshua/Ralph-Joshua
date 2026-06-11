@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile settings and metrics.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "age": { "type": "integer" },
+        "gender": { "type": "string", "enum": ["male", "female"] },
+        "weight": { "type": "number" },
+        "weightUnit": { "type": "string", "enum": ["lbs", "kg"] },
+        "height": { "type": "number" },
+        "waist": { "type": "number" },
+        "waistUnit": { "type": "string", "enum": ["inches", "cm"] },
+        "activityLevel": { "type": "string", "enum": ["sedentary", "light", "moderate", "active", "extreme"] },
+        "bmrPreference": { "type": "string", "enum": ["auto", "manual"] },
+        "manualBmr": { "type": "number" },
+        "startDate": { "type": "string" },
+        "fatLossGoal": { "type": "number" },
+        "day1Photo": { "type": "string" },
+        "day30Photo": { "type": "string" },
+        "day1Weight": { "type": "number" },
+        "day30Weight": { "type": "number" }
+      },
+      "required": ["name", "age", "gender", "weight", "weightUnit", "height", "waist", "waistUnit", "activityLevel", "bmrPreference", "manualBmr", "startDate", "fatLossGoal"]
+    },
+    "DailyLog": {
+      "title": "DailyLog",
+      "description": "Daily food log, active calories, and completion metrics.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "dayNumber": { "type": "integer" },
+        "activeCalories": { "type": "number" },
+        "activityChoice": { "type": "string", "enum": ["low", "medium", "high", "manual", "manual_total"] },
+        "rating": { "type": "string", "enum": ["good_job", "pwede_na", "failed"] },
+        "foodItems": { "type": "array" },
+        "completed": { "type": "boolean" },
+        "notes": { "type": "string" },
+        "notesTitle": { "type": "string" },
+        "totalCaloriesOut": { "type": "number" },
+        "customCaloriesInGoal": { "type": "number" }
+      },
+      "required": ["date", "dayNumber", "activeCalories", "foodItems", "completed"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": "UserProfile",
+      "description": "Stores user profile configurations."
+    },
+    "/profiles/{userId}/logs/{date}": {
+      "schema": "DailyLog",
+      "description": "Daily diet and exercise logging for the user."
+    }
+  }
+}

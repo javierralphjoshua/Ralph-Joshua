@@ -5,6 +5,26 @@ import Charts from './components/Charts';
 import FoodDiary from './components/FoodDiary';
 import CalorieGoalChart from './components/CalorieGoalChart';
 import MathCockpit from './components/MathCockpit';
+import AuthGateway from './components/AuthGateway';
+import { 
+  auth, 
+  db, 
+  handleFirestoreError, 
+  OperationType 
+} from './firebase';
+import { 
+  onAuthStateChanged, 
+  signOut, 
+  User 
+} from 'firebase/auth';
+import { 
+  collection, 
+  doc, 
+  getDoc, 
+  getDocs, 
+  setDoc, 
+  deleteDoc 
+} from 'firebase/firestore';
 import { 
   Flame, 
   Settings2, 
@@ -25,7 +45,10 @@ import {
   Download,
   X,
   Share2,
-  Copy
+  Copy,
+  Cloud,
+  LogOut,
+  Sliders
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -278,6 +301,12 @@ function renderTransformationCard(profile: UserProfile, stats: any, callback: (d
 }
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [guestMode, setGuestMode] = useState<boolean>(() => {
+    return localStorage.getItem('challenge_profile_v1') !== null || localStorage.getItem('guest_mode_preferred') === 'true';
+  });
+
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [logs, setLogs] = useState<Record<string, DailyLog>>({});
   const [selectedDay, setSelectedDay] = useState<number>(1);
@@ -324,7 +353,7 @@ export default function App() {
         [transPhotoType.current === 'day1' ? 'day1Photo' : 'day30Photo']: base64
       };
       setProfile(updatedProfile);
-      saveState(updatedProfile, logs);
+      saveState(updatedProfile, logs); // update cloud and local
     };
     reader.readAsDataURL(file);
   };
@@ -344,35 +373,181 @@ export default function App() {
     }, 150);
   };
 
-  // 1. Local Storage Hydration
+  // 1. Firebase Authentication & Cloud Sync
   useEffect(() => {
-    try {
-      const savedProfile = localStorage.getItem('challenge_profile_v1');
-      const savedLogs = localStorage.getItem('challenge_logs_v1');
-      
-      if (savedProfile) {
-        setProfile(JSON.parse(savedProfile));
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        setAuthLoading(true);
+        try {
+          const profileRef = doc(db, 'profiles', user.uid);
+          const profileSnap = await getDoc(profileRef);
+
+          let loadedProfile: UserProfile | null = null;
+          let loadedLogs: Record<string, DailyLog> = {};
+
+          if (profileSnap.exists()) {
+            loadedProfile = profileSnap.data() as UserProfile;
+            
+            const logsRef = collection(db, 'profiles', user.uid, 'logs');
+            const logsSnap = await getDocs(logsRef);
+            logsSnap.forEach((doc) => {
+              loadedLogs[doc.id] = doc.data() as DailyLog;
+            });
+
+            setProfile(loadedProfile);
+            setLogs(loadedLogs);
+            setToastMessage("Cloud profile downloaded successfully! ☁️");
+          } else {
+            // No profile in cloud yet: Migrate guest/local data to cloud if it exists!
+            const localProfileStr = localStorage.getItem('challenge_profile_v1');
+            const localLogsStr = localStorage.getItem('challenge_logs_v1');
+
+            if (localProfileStr) {
+              const localProfile = JSON.parse(localProfileStr);
+              const localLogs = localLogsStr ? JSON.parse(localLogsStr) : {};
+
+              const cleanLocalProfile = JSON.parse(JSON.stringify(localProfile));
+              try {
+                await setDoc(doc(db, 'profiles', user.uid), cleanLocalProfile);
+              } catch (err) {
+                handleFirestoreError(err, OperationType.WRITE, `profiles/${user.uid}`);
+              }
+
+              for (const [date, log] of Object.entries(localLogs)) {
+                const cleanLocalLog = JSON.parse(JSON.stringify(log));
+                try {
+                  await setDoc(doc(db, 'profiles', user.uid, 'logs', date), cleanLocalLog);
+                } catch (err) {
+                  handleFirestoreError(err, OperationType.WRITE, `profiles/${user.uid}/logs/${date}`);
+                }
+              }
+
+              setProfile(localProfile);
+              setLogs(localLogs);
+              setToastMessage("✓ Synced guest challenge metrics to cloud! 🚀");
+            } else {
+              setProfile(null);
+              setLogs({});
+            }
+          }
+        } catch (e) {
+          console.error("Firestore sync error", e);
+          setToastMessage("Failed to sync cloud database. Check security rules 📡");
+        } finally {
+          setAuthLoading(false);
+        }
+      } else {
+        // No authenticated user active
+        setAuthLoading(false);
+        // Hydrate from localStorage
+        try {
+          const savedProfile = localStorage.getItem('challenge_profile_v1');
+          const savedLogs = localStorage.getItem('challenge_logs_v1');
+          if (savedProfile) {
+            setProfile(JSON.parse(savedProfile));
+          } else {
+            setProfile(null);
+          }
+          if (savedLogs) {
+            setLogs(JSON.parse(savedLogs));
+          } else {
+            setLogs({});
+          }
+        } catch (e) {
+          console.error(e);
+        }
       }
-      if (savedLogs) {
-        setLogs(JSON.parse(savedLogs));
-      }
-    } catch (e) {
-      console.error('Error loading data from localStorage', e);
-    }
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  // 2. Local Storage Persistence
-  const saveState = (newProfile: UserProfile | null, newLogs: Record<string, DailyLog>) => {
+  // 2. Local & Cloud Sync State Persistence
+  const saveState = async (newProfile: UserProfile | null, newLogs: Record<string, DailyLog>, dateToSync?: string) => {
     try {
+      // Offline backup
       if (newProfile) {
         localStorage.setItem('challenge_profile_v1', JSON.stringify(newProfile));
       } else {
         localStorage.removeItem('challenge_profile_v1');
       }
       localStorage.setItem('challenge_logs_v1', JSON.stringify(newLogs));
+
+      // Cloud backup
+      if (currentUser) {
+        const cleanProfile = newProfile ? JSON.parse(JSON.stringify(newProfile)) : null;
+
+        if (cleanProfile) {
+          try {
+            await setDoc(doc(db, 'profiles', currentUser.uid), cleanProfile);
+          } catch (err) {
+            handleFirestoreError(err, OperationType.WRITE, `profiles/${currentUser.uid}`);
+          }
+        } else {
+          try {
+            await deleteDoc(doc(db, 'profiles', currentUser.uid));
+          } catch (err) {
+            handleFirestoreError(err, OperationType.DELETE, `profiles/${currentUser.uid}`);
+          }
+        }
+
+        if (dateToSync) {
+          const log = newLogs[dateToSync];
+          if (log) {
+            const cleanLog = JSON.parse(JSON.stringify(log));
+            try {
+              await setDoc(doc(db, 'profiles', currentUser.uid, 'logs', dateToSync), cleanLog);
+            } catch (err) {
+              handleFirestoreError(err, OperationType.WRITE, `profiles/${currentUser.uid}/logs/${dateToSync}`);
+            }
+          } else {
+            try {
+              await deleteDoc(doc(db, 'profiles', currentUser.uid, 'logs', dateToSync));
+            } catch (err) {
+              handleFirestoreError(err, OperationType.DELETE, `profiles/${currentUser.uid}/logs/${dateToSync}`);
+            }
+          }
+        } else {
+          // Bulk upload (seeding or full sync)
+          for (const [date, log] of Object.entries(newLogs)) {
+            const cleanLog = JSON.parse(JSON.stringify(log));
+            try {
+              await setDoc(doc(db, 'profiles', currentUser.uid, 'logs', date), cleanLog);
+            } catch (err) {
+              handleFirestoreError(err, OperationType.WRITE, `profiles/${currentUser.uid}/logs/${date}`);
+            }
+          }
+        }
+      }
     } catch (e) {
-      console.error('Error saving data to localStorage', e);
+      console.error('Core save operation failed', e);
+      if (currentUser) {
+        setToastMessage("Warning: Save failure. Cloud permissions issue? 📡");
+      }
     }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut(auth);
+      setProfile(null);
+      setLogs({});
+      setGuestMode(false);
+      localStorage.removeItem('challenge_profile_v1');
+      localStorage.removeItem('challenge_logs_v1');
+      localStorage.removeItem('guest_mode_preferred');
+      setToastMessage("✓ Signed out successfully! 👋");
+    } catch (e) {
+      console.error(e);
+      setToastMessage("Error signing out.");
+    }
+  };
+
+  const handleContinueAsGuest = () => {
+    setGuestMode(true);
+    localStorage.setItem('guest_mode_preferred', 'true');
+    setToastMessage("Welcome! Browsing in Guest (Offline) Mode 🕶️");
   };
 
   // 3. Date Utilities
@@ -517,7 +692,7 @@ export default function App() {
     };
     
     setLogs(newLogs);
-    saveState(profile, newLogs);
+    saveState(profile, newLogs, dateStr);
   };
 
   const handleAddFoodToActiveDay = (newItem: Omit<FoodLogItem, 'id'>) => {
@@ -598,12 +773,26 @@ export default function App() {
     setShowResetConfirm(true);
   };
 
-  const executeResetChallenge = () => {
+  const executeResetChallenge = async () => {
     setProfile(null);
     setLogs({});
     setSelectedDay(1);
     localStorage.removeItem('challenge_profile_v1');
     localStorage.removeItem('challenge_logs_v1');
+    
+    if (currentUser) {
+      try {
+        await deleteDoc(doc(db, 'profiles', currentUser.uid));
+        const logsRef = collection(db, 'profiles', currentUser.uid, 'logs');
+        const logsSnap = await getDocs(logsRef);
+        for (const d of logsSnap.docs) {
+          await deleteDoc(d.ref);
+        }
+      } catch (e) {
+        console.error("Firestore data deletion fail", e);
+      }
+    }
+    
     setShowResetConfirm(false);
     setToastMessage("✓ Challenge progress was successfully reset! 🔄");
   };
@@ -696,6 +885,51 @@ export default function App() {
   const proteinGoalMaxVal = Math.round(userWeightLbs * 1.0);
   const uncompletedPriorDays = getUncompletedPriorDays();
 
+  // Screen Loader while computing Cloud Vault permissions
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-center space-y-4" id="app-cloud-loading-screen">
+        <div className="w-10 h-10 border-4 border-lime-400 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-[10px] font-mono text-zinc-400 uppercase tracking-widest animate-pulse">Syncing Cloud Vault...</p>
+      </div>
+    );
+  }
+
+  // Credentials Gateway Entry Guard
+  if (!currentUser && !guestMode) {
+    return (
+      <div className="min-h-screen bg-zinc-950 text-white selection:bg-lime-400 selection:text-zinc-950 font-sans pb-16 antialiased relative" id="app-auth-gateway-screen">
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#27272a_1px,transparent_1px),linear-gradient(to_bottom,#27272a_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-30 pointer-events-none"></div>
+        
+        <header className="border-b border-zinc-900 bg-zinc-950/80 backdrop-blur sticky top-0 z-40">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="bg-lime-400 p-2 rounded-xl text-zinc-950 font-black shadow-[0_0_15px_rgba(163,230,53,0.3)] flex items-center justify-center">
+                <Zap className="w-5 h-5 fill-zinc-950 stroke-zinc-950 stroke-[3]" />
+              </div>
+              <div>
+                <h1 className="text-base font-extrabold tracking-widest text-[#a3e635] uppercase leading-none">
+                  Ragnar’s 30 Days Challenge
+                </h1>
+                <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Fat loss is just Math</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <AuthGateway 
+            onSuccess={() => {
+              setGuestMode(false);
+              setToastMessage("✓ Logged in successfully! Cloud state active. ☁️");
+            }} 
+            onContinueAsGuest={handleContinueAsGuest} 
+          />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-zinc-950 text-white selection:bg-lime-400 selection:text-zinc-950 font-sans pb-16 antialiased">
       {/* Dynamic Background Grid Pattern */}
@@ -716,26 +950,67 @@ export default function App() {
             </div>
           </div>
 
-          {profile && (
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setShowSettings(!showSettings)}
-                className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition"
-              >
-                <Settings2 className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Metabolic settings</span>
-              </button>
-              <button
-                onClick={handleResetChallenge}
-                className="bg-zinc-900/50 hover:bg-rose-500/10 border border-zinc-800 hover:border-rose-500/20 text-zinc-300 hover:text-rose-400 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition"
-                title="Reset / Restart Challenge"
-                id="header-restart-btn"
-              >
-                <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
-                <span>Restart</span>
-              </button>
-            </div>
-          )}
+          {/* Cloud Sync State Indicators + Settings controls */}
+          <div className="flex items-center space-x-3">
+            {currentUser ? (
+              <div className="flex items-center space-x-2 bg-zinc-900/60 border border-zinc-800 px-3 py-1.5 rounded-xl" id="header-authenticated-badge">
+                <Cloud className="w-3.5 h-3.5 text-lime-400" />
+                <span className="text-[10px] font-bold font-mono text-zinc-300 hidden md:inline">
+                  {currentUser.email?.split('@')[0]}
+                </span>
+                <span className="text-[9px] text-lime-400 bg-lime-400/10 px-1.5 py-0.5 rounded font-black uppercase tracking-wider hidden sm:inline">
+                  Active Cloud
+                </span>
+                <button
+                  onClick={handleSignOut}
+                  className="hover:text-rose-450 text-zinc-400 transition ml-1 cursor-pointer"
+                  title="Logout Account"
+                  id="header-logout-chevron"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center space-x-2 bg-zinc-900/60 border border-zinc-850 px-3 py-1.5 rounded-xl" id="header-guest-badge">
+                <Cloud className="w-3.5 h-3.5 text-zinc-500 line-through" />
+                <span className="text-[10px] font-bold font-mono text-zinc-400 hidden md:inline">
+                  Guest Session
+                </span>
+                <button
+                  onClick={() => {
+                    setGuestMode(false);
+                    localStorage.removeItem('guest_mode_preferred');
+                  }}
+                  className="text-[9px] text-lime-400 hover:text-lime-300 font-extrabold uppercase tracking-wider transition bg-lime-400/5 hover:bg-lime-400/10 px-2 py-0.5 rounded border border-lime-400/20 cursor-pointer"
+                  title="Securely Migrate Draft to Cloud"
+                  id="header-guest-upgrade-button"
+                >
+                  Save Cloud
+                </button>
+              </div>
+            )}
+
+            {profile && (
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setShowSettings(!showSettings)}
+                  className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition whitespace-nowrap"
+                >
+                  <Settings2 className="w-3.5 h-3.5 text-zinc-400" />
+                  <span className="hidden lg:inline">Metabolic settings</span>
+                </button>
+                <button
+                  onClick={handleResetChallenge}
+                  className="bg-zinc-900/50 hover:bg-rose-500/10 border border-zinc-800 hover:border-rose-500/20 text-zinc-300 hover:text-rose-400 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition"
+                  title="Reset / Restart Challenge"
+                  id="header-restart-btn"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+                  <span className="hidden sm:inline">Restart</span>
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
