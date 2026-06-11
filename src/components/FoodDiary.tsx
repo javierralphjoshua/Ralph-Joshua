@@ -93,7 +93,99 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  // call server-side Gemini estimator
+  const estimateHeuristicallyLocal = (input: string) => {
+    const text = (input || "").toLowerCase().trim();
+    
+    const database = [
+      { keys: ["chicken breast", "chicken breast", "chicken", "manok", "chicken breast fillet"], kcal: 165, p: 31, c: 0, f: 3.6, name: "Chicken Breast", defaultG: 150 },
+      { keys: ["jasmine rice", "white rice", "brown rice", "rice", "kanin"], kcal: 130, p: 2.7, c: 28, f: 0.3, name: "White Rice", defaultG: 200 },
+      { keys: ["egg", "eggs", "itlog", "boiled egg", "fried egg"], kcal: 140, p: 12, c: 1, f: 10, name: "Egg", defaultG: 100 },
+      { keys: ["whey", "protein powder", "whey protein", "shake", "scoop"], kcal: 380, p: 80, c: 8, f: 5, name: "Whey Protein", defaultG: 30 },
+      { keys: ["beef", "baka", "steak", "ground beef", "lean beef"], kcal: 250, p: 26, c: 0, f: 15, name: "Beef", defaultG: 150 },
+      { keys: ["pork", "baboy", "porkchop", "liempo", "pork loin"], kcal: 240, p: 27, c: 0, f: 14, name: "Pork", defaultG: 150 },
+      { keys: ["fish", "isda", "salmon", "tilapia", "tuna", "tuna flakes"], kcal: 185, p: 21, c: 0, f: 9, name: "Fish/Salmon", defaultG: 150 },
+      { keys: ["banana", "saging", "bananas"], kcal: 89, p: 1.1, c: 23, f: 0.3, name: "Banana", defaultG: 120 },
+      { keys: ["apple", "mansanas", "apples"], kcal: 52, p: 0.3, c: 14, f: 0.2, name: "Apple", defaultG: 150 },
+      { keys: ["oats", "oatmeal", "quaker oats", "rolled oats"], kcal: 389, p: 16.9, c: 66, f: 6.9, name: "Oats", defaultG: 50 },
+      { keys: ["bread", "tinapay", "whole wheat bread", "slice", "slices"], kcal: 265, p: 9, c: 49, f: 3.2, name: "Bread/Slices", defaultG: 60 },
+      { keys: ["potato", "patatas", "potatoes", "sweet potato", "kamote"], kcal: 77, p: 2, c: 17, f: 0.1, name: "Potato", defaultG: 150 },
+      { keys: ["milk", "gatas", "fresh milk", "cow milk"], kcal: 50, p: 3.3, c: 4.8, f: 2, name: "Milk", defaultG: 200 },
+      { keys: ["avocado", "abocado"], kcal: 160, p: 2, c: 9, f: 15, name: "Avocado", defaultG: 100 },
+      { keys: ["peanut butter", "peanut butter", "butter"], kcal: 588, p: 25, c: 20, f: 50, name: "Peanut Butter", defaultG: 32 }
+    ];
+
+    let matchedFoods: string[] = [];
+    let totalKcal = 0;
+    let totalP = 0;
+    let totalC = 0;
+    let totalF = 0;
+    let foundAny = false;
+
+    const weightRegex = /(\d+)\s*(?:g|grams?|ml)\b/i;
+
+    database.forEach(item => {
+      let matchedKey: string | null = null;
+      for (const key of item.keys) {
+        if (text.includes(key)) {
+          matchedKey = key;
+          break;
+        }
+      }
+
+      if (matchedKey) {
+        foundAny = true;
+        let weight = item.defaultG;
+
+        const keywordIdx = text.indexOf(matchedKey);
+        const surroundingText = text.slice(
+          Math.max(0, keywordIdx - 20),
+          Math.min(text.length, keywordIdx + matchedKey.length + 20)
+        );
+        
+        const match = surroundingText.match(weightRegex);
+        if (match) {
+          weight = parseInt(match[1]) || item.defaultG;
+        } else {
+          const globalMatch = text.match(weightRegex);
+          if (globalMatch) {
+            weight = parseInt(globalMatch[1]) || item.defaultG;
+          }
+        }
+
+        const factor = weight / 100;
+        totalKcal += Math.round(item.kcal * factor);
+        totalP += Math.round(item.p * factor);
+        totalC += Math.round(item.c * factor);
+        totalF += Math.round(item.f * factor);
+        
+        matchedFoods.push(`${weight}g ${item.name}`);
+      }
+    });
+
+    if (!foundAny) {
+      return {
+        itemName: input ? `Custom Entry: ${input}` : "Standard Fitness Meal",
+        calories: 320,
+        protein: 18,
+        carbs: 42,
+        fat: 10,
+        confidence: 0.5,
+        description: "⚡ Client-Side Estimation Active (Netlify static deployment detected). Edit values below before logging!"
+      };
+    }
+
+    return {
+      itemName: matchedFoods.join(" & "),
+      calories: totalKcal,
+      protein: totalP,
+      carbs: totalC,
+      fat: totalF,
+      confidence: 0.8,
+      description: "⚡ Fallback matched successfully (Netlify static host active): " + matchedFoods.join(", ") + ". Edit below if needed!"
+    };
+  };
+
+  // call server-side Gemini estimator or direct client-side Gemini API on client-only setups (like Netlify)
   const handleAiEstimate = async () => {
     if (!aiPrompt.trim() && !imageFile) {
       setAiError('Please enter a description or upload a food photo first.');
@@ -104,15 +196,137 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
     setAiError(null);
     setAiResult(null);
 
+    const clientApiKey = (import.meta as any).env.VITE_GEMINI_API_KEY;
+
     try {
       let base64String = '';
       let mimeType = '';
 
       if (imageFile) {
         base64String = await fileToBase64(imageFile);
+        // Base64 string from FileReader often starts with data:image/png;base64, which needs to be removed for the official REST payload
+        if (base64String.includes('base64,')) {
+          base64String = base64String.split('base64,')[1];
+        }
         mimeType = imageFile.type;
       }
 
+      // 1. If client key is available (typical for external builds like Netlify), call the official REST API directly!
+      if (clientApiKey) {
+        console.log("Configured client key found. Calling Google Gemini API directly (for Netlify/static setups)...");
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${clientApiKey}`;
+
+        const parts: any[] = [];
+        if (base64String && mimeType) {
+          parts.push({
+            inlineData: {
+              mimeType: mimeType,
+              data: base64String
+            }
+          });
+        }
+        parts.push({
+          text: aiPrompt.trim()
+        });
+
+        const bodyPayload = {
+          contents: [
+            {
+              parts: parts
+            }
+          ],
+          systemInstruction: {
+            parts: [
+              {
+                text: "You are an expert athletic nutritionist and dietitian. Based on the food text description and/or the uploaded image, deliver a realistic estimation of the food name, total calorie count, and macronutrients (calories, protein, carbs, fat). Be precise.\n\nCRITICAL DIRECTIVE ON USER'S TEXTUAL SPECIFICATIONS:\nYou must HEAVILY PRIORITIZE and strictly respect any written weights, grams, ounces, or exact portion quantities specified in the user's text description (e.g. '100g chicken breast', '250g white jasmine rice'). Use the uploaded image simply as a visual reference/verification aid. Do NOT override the written portion sizes or specifications with generic values based on the image.\n\nSTRICT JSON OUTPUT REQUIREMENT:\nAlways respond with ONLY a clean, raw, valid JSON object matching the requested schema. Do NOT wrap the JSON in markdown code blocks, HTML tags, or any other conversational wrapper text. Start directly with '{' and end with '}'."
+              }
+            ]
+          },
+          generationConfig: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                itemName: {
+                  type: "STRING",
+                  description: "A short, clean, descriptive name of the food item or combined dish analyzed."
+                },
+                calories: {
+                  type: "INTEGER",
+                  description: "Estimated total calories in kcal."
+                },
+                protein: {
+                  type: "INTEGER",
+                  description: "Estimated protein content in grams."
+                },
+                carbs: {
+                  type: "INTEGER",
+                  description: "Estimated carbohydrates in grams."
+                },
+                fat: {
+                  type: "INTEGER",
+                  description: "Estimated total fat in grams."
+                },
+                confidence: {
+                  type: "NUMBER",
+                  description: "Nutritionist confidence score from 0.0 to 1.0 based on description specificity or image quality."
+                },
+                description: {
+                  type: "STRING",
+                  description: "A brief 2-sentence explanation of how the estimate was generated, highlighting the main ingredients detected."
+                }
+              },
+              required: ["itemName", "calories", "protein", "carbs", "fat", "confidence", "description"]
+            }
+          }
+        };
+
+        const directResponse = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(bodyPayload)
+        });
+
+        if (!directResponse.ok) {
+          const errText = await directResponse.text();
+          throw new Error(`Gemini official API returned status ${directResponse.status}: ${errText}`);
+        }
+
+        const directData = await directResponse.json();
+        const rawText = directData.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawText) {
+          throw new Error("No response content candidate received from direct Gemini call.");
+        }
+
+        let parsedEstimate: any = null;
+        const trimmed = rawText.trim();
+        try {
+          parsedEstimate = JSON.parse(trimmed);
+        } catch (parseErr) {
+          let cleaned = trimmed;
+          if (cleaned.startsWith("```")) {
+            cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+          }
+          cleaned = cleaned.trim();
+          parsedEstimate = JSON.parse(cleaned);
+        }
+
+        if (parsedEstimate) {
+          parsedEstimate.calories = Math.round(Number(parsedEstimate.calories) || 0);
+          parsedEstimate.protein = Math.round(Number(parsedEstimate.protein) || 0);
+          parsedEstimate.carbs = Math.round(Number(parsedEstimate.carbs) || 0);
+          parsedEstimate.fat = Math.round(Number(parsedEstimate.fat) || 0);
+        }
+
+        setAiResult(parsedEstimate);
+        return;
+      }
+
+      // 2. Otherwise/Fallback: Attempt backend server-side proxy route
+      console.log("No direct VITE_GEMINI_API_KEY configured. Attempting standard Express proxy...");
+      const localBase64 = imageFile ? await fileToBase64(imageFile) : '';
       const response = await fetch('/api/estimate-calories', {
         method: 'POST',
         headers: {
@@ -120,21 +334,27 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
         },
         body: JSON.stringify({
           textDescription: aiPrompt.trim(),
-          imageData: base64String || undefined,
+          imageData: localBase64 || undefined,
           imageMimeType: mimeType || undefined,
         }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Server error estimating calories');
+      const contentType = response.headers.get("content-type") || "";
+      if (!response.ok || !contentType.includes("application/json")) {
+        console.warn("Express backend route missing or failed, switching to local heuristical estimator...");
+        const result = estimateHeuristicallyLocal(aiPrompt.trim());
+        setAiResult(result);
+        return;
       }
 
+      const data = await response.json();
       setAiResult(data);
     } catch (err: any) {
-      console.error(err);
-      setAiError(err.message || 'Connection failed. Please check internet.');
+      console.warn("Primary API pipeline failed. Deploying client-side heuristic estimator fallback:", err);
+      const result = estimateHeuristicallyLocal(aiPrompt.trim());
+      // Adjust the source flag to state it's a fallback on exception
+      result.description = `⚡ Safe local estimate (Google Gemini API request failed: ${err.message || 'connection issue'}). Edit macros below!`;
+      setAiResult(result);
     } finally {
       setIsAiLoading(false);
     }

@@ -2340,15 +2340,20 @@ export default function App() {
                         🛡️ Creator's Guarantee & Pledge
                       </h3>
                       <div className="text-xs text-zinc-300 font-medium leading-relaxed space-y-3">
-                        <p className="italic">
+                        <p className="italic font-sans">
                           "This challenge is not easy. It requires you to eat less, move more, and track your food consistently. Commitment for 30 days is an absolute must."
                         </p>
-                        <p className="italic">
-                          "I made this easy for you to follow. Stick to it, and I guarantee you will lose pure fat, maintain or grow your muscle, and change the way you look."
+                        <p className="italic font-sans">
+                          "I made this easy for you to follow. Stick to it, and I guarantee you will lose pure fat, maintain or grow your muscle, and change the way you look in just 30 days."
                         </p>
-                        <p className="font-extrabold text-[#a3e635]">
-                          Good luck! — Ragnar
-                        </p>
+                        <div className="pt-2 font-mono space-y-0.5">
+                          <p className="font-extrabold text-[#a3e635] tracking-wide">
+                            good luck!
+                          </p>
+                          <p className="font-black text-zinc-400">
+                            - Ragnar.
+                          </p>
+                        </div>
                       </div>
                       <div className="pt-0.5 flex items-center gap-1.5">
                         <span className="h-1 w-1 rounded-full bg-lime-400 animate-pulse"></span>
