@@ -1,75 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global Safety Net default catch-all
     match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Base primitives
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    // Authenticated matches the resource owner UID
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    // Profiles document schema validation
-    function isValidUserProfile(data) {
-      return data.keys().hasAll(['name'])
-        && data.name is string && data.name.size() <= 200
-        && (!data.keys().contains('age') || data.age is number)
-        && (!data.keys().contains('gender') || data.gender is string)
-        && (!data.keys().contains('weight') || data.weight is number)
-        && (!data.keys().contains('weightUnit') || data.weightUnit is string)
-        && (!data.keys().contains('height') || data.height is number)
-        && (!data.keys().contains('waist') || data.waist is number)
-        && (!data.keys().contains('waistUnit') || data.waistUnit is string)
-        && (!data.keys().contains('activityLevel') || data.activityLevel is string)
-        && (!data.keys().contains('bmrPreference') || data.bmrPreference is string)
-        && (!data.keys().contains('manualBmr') || data.manualBmr is number)
-        && (!data.keys().contains('startDate') || data.startDate is string)
-        && (!data.keys().contains('fatLossGoal') || data.fatLossGoal is number);
-    }
-
-    // Daily Logs schema validation
-    function isValidDailyLog(data) {
-      return data.keys().hasAll(['dayNumber', 'completed'])
-        && data.dayNumber is number
-        && data.completed is bool
-        && (!data.keys().contains('date') || (data.date is string && data.date.size() <= 50))
-        && (!data.keys().contains('activeCalories') || data.activeCalories is number)
-        && (!data.keys().contains('foodItems') || (data.foodItems is list && data.foodItems.size() <= 200));
-    }
-
-    // Profiles Collection
-    match /profiles/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUserProfile(incoming());
-      allow update: if isOwner(userId) && isValidUserProfile(incoming());
-      allow delete: if isOwner(userId);
-
-      // Logs Subcollection
-      match /logs/{date} {
-        allow read: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidDailyLog(incoming()) && isValidId(date);
-        allow update: if isOwner(userId) && isValidDailyLog(incoming()) && isValidId(date);
-        allow delete: if isOwner(userId);
-      }
+      allow read, write: if true;
     }
   }
 }

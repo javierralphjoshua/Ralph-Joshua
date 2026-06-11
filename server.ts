@@ -40,9 +40,9 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", apiKeyAvailable: !!apiKey });
 });
 
-// Helper function to query Gemini with retry exponential backoff and model fallbacks (e.g. gemini-3.1-flash-lite)
+// Helper function to query Gemini with retry exponential backoff and model fallbacks (e.g. gemini-3.1-flash-lite, gemini-flash-latest)
 async function generateCaloriesWithRetry(ai: GoogleGenAI, contentsParts: any[]): Promise<string> {
-  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite"];
+  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
   const maxRetriesPerModel = 2;
   const initialDelayMs = 1200;
   let lastError: any = null;

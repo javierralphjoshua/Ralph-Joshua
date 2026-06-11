@@ -12,11 +12,11 @@ import {
   handleFirestoreError, 
   OperationType 
 } from './firebase';
-import { 
-  onAuthStateChanged, 
-  signOut, 
-  User 
-} from 'firebase/auth';
+// Custom lightweight user session type
+export interface CustomUser {
+  uid: string;
+  email: string;
+}
 import { 
   collection, 
   doc, 
@@ -301,7 +301,7 @@ function renderTransformationCard(profile: UserProfile, stats: any, callback: (d
 }
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<CustomUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [guestMode, setGuestMode] = useState<boolean>(() => {
     return localStorage.getItem('challenge_profile_v1') !== null || localStorage.getItem('guest_mode_preferred') === 'true';
@@ -373,13 +373,16 @@ export default function App() {
     }, 150);
   };
 
-  // 1. Firebase Authentication & Cloud Sync
+  // 1. Custom Simplified Session Sync
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-      if (user) {
-        setAuthLoading(true);
+    const initSession = async () => {
+      const savedSessionStr = localStorage.getItem('ragnars_challenge_session');
+      if (savedSessionStr) {
         try {
+          const user = JSON.parse(savedSessionStr) as CustomUser;
+          setCurrentUser(user);
+          setAuthLoading(true);
+
           const profileRef = doc(db, 'profiles', user.uid);
           const profileSnap = await getDoc(profileRef);
 
@@ -399,7 +402,7 @@ export default function App() {
             setLogs(loadedLogs);
             setToastMessage("Cloud profile downloaded successfully! ☁️");
           } else {
-            // No profile in cloud yet: Migrate guest/local data to cloud if it exists!
+            // Migrate guest/local data to cloud if it exists
             const localProfileStr = localStorage.getItem('challenge_profile_v1');
             const localLogsStr = localStorage.getItem('challenge_logs_v1');
 
@@ -433,34 +436,37 @@ export default function App() {
           }
         } catch (e) {
           console.error("Firestore sync error", e);
-          setToastMessage("Failed to sync cloud database. Check security rules 📡");
+          // Hydrate offline backup
+          migrateOfflineBackup();
         } finally {
           setAuthLoading(false);
         }
       } else {
-        // No authenticated user active
         setAuthLoading(false);
-        // Hydrate from localStorage
-        try {
-          const savedProfile = localStorage.getItem('challenge_profile_v1');
-          const savedLogs = localStorage.getItem('challenge_logs_v1');
-          if (savedProfile) {
-            setProfile(JSON.parse(savedProfile));
-          } else {
-            setProfile(null);
-          }
-          if (savedLogs) {
-            setLogs(JSON.parse(savedLogs));
-          } else {
-            setLogs({});
-          }
-        } catch (e) {
-          console.error(e);
-        }
+        migrateOfflineBackup();
       }
-    });
+    };
 
-    return () => unsubscribe();
+    const migrateOfflineBackup = () => {
+      try {
+        const savedProfile = localStorage.getItem('challenge_profile_v1');
+        const savedLogs = localStorage.getItem('challenge_logs_v1');
+        if (savedProfile) {
+          setProfile(JSON.parse(savedProfile));
+        } else {
+          setProfile(null);
+        }
+        if (savedLogs) {
+          setLogs(JSON.parse(savedLogs));
+        } else {
+          setLogs({});
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+
+    initSession();
   }, []);
 
   // 2. Local & Cloud Sync State Persistence
@@ -530,7 +536,8 @@ export default function App() {
 
   const handleSignOut = async () => {
     try {
-      await signOut(auth);
+      localStorage.removeItem('ragnars_challenge_session');
+      setCurrentUser(null);
       setProfile(null);
       setLogs({});
       setGuestMode(false);
@@ -606,8 +613,12 @@ export default function App() {
 
   // 4. Handle Save Profile Configuration
   const handleSaveProfile = (updatedProfile: UserProfile) => {
-    setProfile(updatedProfile);
-    saveState(updatedProfile, logs);
+    const finalProfile = { ...updatedProfile };
+    if (profile && profile.password) {
+      finalProfile.password = profile.password;
+    }
+    setProfile(finalProfile);
+    saveState(finalProfile, logs);
     setShowSettings(false);
   };
 
@@ -919,7 +930,8 @@ export default function App() {
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <AuthGateway 
-            onSuccess={() => {
+            onLoginSuccess={(user) => {
+              setCurrentUser(user);
               setGuestMode(false);
               setToastMessage("✓ Logged in successfully! Cloud state active. ☁️");
             }} 
@@ -938,7 +950,17 @@ export default function App() {
       {/* Top Navigation Frame */}
       <header className="border-b border-zinc-900 bg-zinc-950/80 backdrop-blur sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+          <div 
+            onClick={() => {
+              if (profile) {
+                setActiveTab('journal');
+                setShowSettings(false);
+              }
+            }}
+            className={`flex items-center space-x-3 select-none ${profile ? 'cursor-pointer hover:opacity-80 transition' : ''}`}
+            id="header-title-home-brand"
+            title={profile ? "Go to Journal Home" : undefined}
+          >
             <div className="bg-lime-400 p-2 rounded-xl text-zinc-950 font-black shadow-[0_0_15px_rgba(163,230,53,0.3)] flex items-center justify-center">
               <Zap className="w-5 h-5 fill-zinc-950 stroke-zinc-950 stroke-[3]" />
             </div>
@@ -963,11 +985,12 @@ export default function App() {
                 </span>
                 <button
                   onClick={handleSignOut}
-                  className="hover:text-rose-450 text-zinc-400 transition ml-1 cursor-pointer"
+                  className="hover:text-rose-400 hover:bg-rose-500/10 text-zinc-400 flex items-center gap-1 transition ml-2 cursor-pointer bg-zinc-950 border border-zinc-800 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider"
                   title="Logout Account"
                   id="header-logout-chevron"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
+                  <LogOut className="w-3 h-3 text-rose-400" />
+                  <span>Exit Session</span>
                 </button>
               </div>
             ) : (
@@ -987,6 +1010,23 @@ export default function App() {
                 >
                   Save Cloud
                 </button>
+                <button
+                  onClick={() => {
+                    setGuestMode(false);
+                    setProfile(null);
+                    setLogs({});
+                    localStorage.removeItem('guest_mode_preferred');
+                    localStorage.removeItem('challenge_profile_v1');
+                    localStorage.removeItem('challenge_logs_v1');
+                    setToastMessage("Cleared guest states and exited! 🚪");
+                  }}
+                  className="text-[9px] text-rose-405 hover:text-rose-400 font-extrabold uppercase tracking-wider transition bg-rose-400/5 hover:bg-rose-400/10 px-2 py-0.5 rounded border border-rose-400/20 cursor-pointer flex items-center gap-0.5 ml-1"
+                  title="Exit Guest Session and clear data"
+                  id="header-guest-exit-button"
+                >
+                  <LogOut className="w-2.5 h-2.5 text-rose-400" />
+                  <span>Exit Guest</span>
+                </button>
               </div>
             )}
 
@@ -994,10 +1034,23 @@ export default function App() {
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setShowSettings(!showSettings)}
-                  className="bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition whitespace-nowrap"
+                  className={`${
+                    showSettings 
+                      ? "bg-rose-500/10 border-rose-500/35 text-rose-400 hover:bg-rose-500/20" 
+                      : "bg-zinc-900 border-zinc-800 hover:border-zinc-700 text-zinc-300"
+                  } border font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition whitespace-nowrap cursor-pointer`}
                 >
-                  <Settings2 className="w-3.5 h-3.5 text-zinc-400" />
-                  <span className="hidden lg:inline">Metabolic settings</span>
+                  {showSettings ? (
+                    <>
+                      <X className="w-3.5 h-3.5 text-rose-400" />
+                      <span>Exit Settings</span>
+                    </>
+                  ) : (
+                    <>
+                      <Settings2 className="w-3.5 h-3.5 text-zinc-400" />
+                      <span className="hidden lg:inline">Metabolic settings</span>
+                    </>
+                  )}
                 </button>
                 <button
                   onClick={handleResetChallenge}

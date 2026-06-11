@@ -1,4 +1,5 @@
 export interface UserProfile {
+  password?: string; // Standard plaintext/hashed password for simple credential authentication
   name: string;
   age: number;
   gender: 'male' | 'female';

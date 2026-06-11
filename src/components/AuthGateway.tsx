@@ -1,111 +1,119 @@
 import React, { useState } from 'react';
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword,
-  signOut,
-  GoogleAuthProvider,
-  signInWithPopup
-} from 'firebase/auth';
-import { auth } from '../firebase';
-import { Shield, Lock, User, Sparkles, Scale, CircleAlert, Eye, EyeOff, LogIn } from 'lucide-react';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { Shield, Lock, User, Sparkles, Scale, CircleAlert, Eye, EyeOff } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface AuthGatewayProps {
-  onSuccess: () => void;
+  onLoginSuccess: (user: { uid: string; email: string }) => void;
   onContinueAsGuest: () => void;
 }
 
-export default function AuthGateway({ onSuccess, onContinueAsGuest }: AuthGatewayProps) {
+export default function AuthGateway({ onLoginSuccess, onContinueAsGuest }: AuthGatewayProps) {
   const [isLogin, setIsLogin] = useState(true);
-  const [identifier, setIdentifier] = useState(''); // username or email
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Helper to standardise usernames into Firebase email format
-  const formatEmail = (val: string): string => {
-    const trimmed = val.trim();
-    if (trimmed.includes('@')) {
-      return trimmed;
-    }
-    // Convert direct username to an email space
-    return `${trimmed.toLowerCase()}@ragnarschallenge.com`;
-  };
-
-  const handleGoogleSignIn = async () => {
-    setError(null);
-    setLoading(true);
-    const provider = new GoogleAuthProvider();
-    // Allow popups for Google Auth
-    provider.setCustomParameters({
-      prompt: 'select_account'
-    });
-
-    try {
-      await signInWithPopup(auth, provider);
-      onSuccess();
-    } catch (err: any) {
-      console.error(err);
-      let errMsg = "Failed to sign in with Google. Please try again.";
-      if (err.code === 'auth/popup-blocked') {
-        errMsg = "Popup blocked! Please enable popups in your browser settings to continue with Google Sign-In.";
-      } else if (err.code === 'auth/network-request-failed') {
-        errMsg = "Network error. Please check your internet connection and try again.";
-      } else if (err.code === 'auth/cancelled-popup-request') {
-        errMsg = "The sign-in popup was closed before completion.";
-      } else if (err.message) {
-        errMsg = err.message;
-      }
-      setError(errMsg);
-    } finally {
-      setLoading(false);
-    }
+  // Validate username format (simple alphanumeric + underscores/hyphens to be safe document IDs)
+  const isValidUsername = (val: string): boolean => {
+    return /^[a-zA-Z0-9_\-]+$/.test(val);
   };
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    const trimmedId = identifier.trim();
-    if (!trimmedId) {
-      setError("Please enter a username or email address.");
+    const trimmedUsername = username.trim().toLowerCase();
+    if (!trimmedUsername) {
+      setError("Please enter a username.");
       return;
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters long.");
+
+    if (!isValidUsername(trimmedUsername)) {
+      setError("Username can only contain letters, numbers, underscores (_), and hyphens (-). No spaces or special characters.");
+      return;
+    }
+
+    if (password.length < 4) {
+      setError("Password must be at least 4 characters long.");
       return;
     }
 
     setLoading(true);
-    const email = formatEmail(trimmedId);
 
     try {
+      const userRef = doc(db, 'profiles', trimmedUsername);
+      const userSnap = await getDoc(userRef);
+
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        // --- SIGN IN MODE ---
+        if (!userSnap.exists()) {
+          setError("No account found with this username. Please switch to the 'Create Account' tab if you are new.");
+          setLoading(false);
+          return;
+        }
+
+        const userData = userSnap.data();
+        // Since we are using standard password storage as requested ("no hard security")
+        if (userData.password !== password) {
+          setError("Incorrect password. Please verify your password and try again.");
+          setLoading(false);
+          return;
+        }
+
+        // Successfully logged in!
+        const sessionUser = {
+          uid: trimmedUsername,
+          email: `${trimmedUsername}@ragnarschallenge.com`
+        };
+        
+        // Save session
+        localStorage.setItem('ragnars_challenge_session', JSON.stringify(sessionUser));
+        onLoginSuccess(sessionUser);
+
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        // --- REGISTER MODE ---
+        if (userSnap.exists()) {
+          setError("This username is already taken. Please choose a different username.");
+          setLoading(false);
+          return;
+        }
+
+        // Create a basic profile document with password and name
+        const initialProfile = {
+          name: username.trim(),
+          password: password,
+          age: 30,
+          gender: 'male' as const,
+          weight: 180,
+          weightUnit: 'lbs' as const,
+          height: 175,
+          waist: 34,
+          waistUnit: 'inches' as const,
+          activityLevel: 'light' as const,
+          bmrPreference: 'auto' as const,
+          manualBmr: 1800,
+          startDate: new Date().toISOString().split('T')[0],
+          fatLossGoal: 10
+        };
+
+        await setDoc(userRef, initialProfile);
+
+        const sessionUser = {
+          uid: trimmedUsername,
+          email: `${trimmedUsername}@ragnarschallenge.com`
+        };
+
+        // Save session
+        localStorage.setItem('ragnars_challenge_session', JSON.stringify(sessionUser));
+        onLoginSuccess(sessionUser);
       }
-      onSuccess();
     } catch (err: any) {
-      console.error(err);
-      let errMsg = "An unexpected error occurred. Please try again.";
-      
-      if (err.code === 'auth/operation-not-allowed') {
-        errMsg = "Custom Email/Password registration is currently disabled for this Firebase project. Please use 'Continue with Google' instead—it is fully supported and works instantly without configuration! Alternatively, you can run in offline Guest Mode.";
-      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        errMsg = "Incorrect password or username. Please check your credentials.";
-      } else if (err.code === 'auth/user-not-found') {
-        errMsg = "No account found with this username or email.";
-      } else if (err.code === 'auth/email-already-in-use') {
-        errMsg = "This username or email is already registered.";
-      } else if (err.code === 'auth/invalid-email') {
-        errMsg = "Invalid username format. Use alphanumeric characters.";
-      } else if (err.code === 'auth/network-request-failed') {
-        errMsg = "Network error. Please check your internet connection.";
-      }
-      
-      setError(errMsg);
+      console.error("Auth helper failure:", err);
+      setError(err?.message || "A database synchronization error occurred. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -133,37 +141,8 @@ export default function AuthGateway({ onSuccess, onContinueAsGuest }: AuthGatewa
               RAGNAR'S 30 DAYS
             </h1>
             <div className="text-[10px] text-lime-400 font-extrabold tracking-widest mt-1 uppercase">
-              Cloud Synchronization Gateway
+              Simplified Cloud Authentication
             </div>
-          </div>
-        </div>
-
-        {/* Instantly Configured Google Sign-In */}
-        <div className="space-y-3 pt-1">
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={loading}
-            className="w-full bg-white hover:bg-zinc-100 text-zinc-950 font-black text-xs uppercase tracking-wider py-3.5 px-4 rounded-xl font-sans cursor-pointer transition flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg active:scale-[0.99]"
-            id="auth-google-btn"
-          >
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none">
-              <path d="M22.5 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-              <path d="M5.84 14.1c-.22-.66-.35-1.36-.35-2.1s.13-1.44.35-2.1V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.84z" fill="#FBBC05"/>
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-            </svg>
-            <span>Continue with Google</span>
-          </button>
-          
-          <p className="text-[9px] text-zinc-400 text-center leading-relaxed font-medium">
-            💡 <strong className="text-lime-400">Recommended:</strong> Works instantly on all phones. No registry/owner setup required.
-          </p>
-
-          <div className="flex items-center pt-2">
-            <div className="flex-grow border-t border-zinc-900"></div>
-            <span className="px-3 text-[9px] font-mono text-zinc-650 uppercase tracking-widest whitespace-nowrap">Or custom credentials</span>
-            <div className="flex-grow border-t border-zinc-900"></div>
           </div>
         </div>
 
@@ -197,7 +176,7 @@ export default function AuthGateway({ onSuccess, onContinueAsGuest }: AuthGatewa
         <form onSubmit={handleAuth} className="space-y-4">
           <div className="space-y-1.5">
             <label className="text-[10px] font-mono uppercase text-zinc-500 tracking-wider block">
-              Username or Email
+              Username
             </label>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-zinc-500">
@@ -206,9 +185,9 @@ export default function AuthGateway({ onSuccess, onContinueAsGuest }: AuthGatewa
               <input
                 type="text"
                 required
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                placeholder={isLogin ? "e.g. ragnar123" : "Choose username or email"}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder={isLogin ? "e.g. ragnar123" : "Choose username (letters/numbers only)"}
                 className="w-full bg-zinc-900 border border-zinc-850 hover:border-zinc-800 focus:border-lime-500 focus:outline-none text-xs text-white rounded-xl pl-9 pr-4 py-3 placeholder:text-zinc-600 transition"
                 id="auth-input-username"
               />
@@ -260,7 +239,7 @@ export default function AuthGateway({ onSuccess, onContinueAsGuest }: AuthGatewa
             {loading ? (
               <span className="w-4 h-4 border-2 border-zinc-950 border-t-transparent rounded-full animate-spin"></span>
             ) : isLogin ? (
-              <span>Sign In Securely</span>
+              <span>Sign In</span>
             ) : (
               <span>Create Account</span>
             )}
@@ -271,10 +250,10 @@ export default function AuthGateway({ onSuccess, onContinueAsGuest }: AuthGatewa
         <div className="text-[10px] text-zinc-500 space-y-1.5 leading-relaxed bg-zinc-900/30 p-3 rounded-xl border border-zinc-900">
           <p className="flex items-center gap-1.5 text-zinc-400">
             <Sparkles className="w-3 h-3 text-lime-400" />
-            <strong className="text-zinc-300 uppercase tracking-wide">Multi-Phone Sync:</strong>
+            <strong className="text-zinc-300 uppercase tracking-wide">Instant Cloud Sync:</strong>
           </p>
           <p>
-            Storing your metrics on the cloud allows accessing your challenge, photo logs, and daily macros from any device instantly, without losing your active profile settings!
+            Storing your metrics on the cloud allows accessing your challenge data, daily macros, and food charts from any device instantly by logging back in.
           </p>
         </div>
 
