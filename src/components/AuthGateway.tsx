@@ -1,7 +1,20 @@
 import React, { useState } from 'react';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase';
-import { Shield, Lock, User, Sparkles, Scale, CircleAlert, Eye, EyeOff } from 'lucide-react';
+import { 
+  Shield, 
+  Lock, 
+  User, 
+  Sparkles, 
+  Scale, 
+  CircleAlert, 
+  Eye, 
+  EyeOff,
+  Database,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw
+} from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface AuthGatewayProps {
@@ -16,6 +29,39 @@ export default function AuthGateway({ onLoginSuccess, onContinueAsGuest }: AuthG
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showAccounts, setShowAccounts] = useState(false);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [loadingAccounts, setLoadingAccounts] = useState(false);
+  const [accountsError, setAccountsError] = useState<string | null>(null);
+
+  const fetchAccounts = async () => {
+    setLoadingAccounts(true);
+    setAccountsError(null);
+    try {
+      const querySnapshot = await getDocs(collection(db, 'profiles'));
+      const list: any[] = [];
+      querySnapshot.forEach((doc) => {
+        list.push({
+          username: doc.id,
+          ...doc.data()
+        });
+      });
+      setAccounts(list);
+    } catch (err: any) {
+      console.error("Failed to fetch profiles:", err);
+      setAccountsError("Could not retrieve accounts library.");
+    } finally {
+      setLoadingAccounts(false);
+    }
+  };
+
+  const handleToggleAccounts = () => {
+    const nextVal = !showAccounts;
+    setShowAccounts(nextVal);
+    if (nextVal) {
+      fetchAccounts();
+    }
+  };
 
   // Validate username format (simple alphanumeric + underscores/hyphens to be safe document IDs)
   const isValidUsername = (val: string): boolean => {
@@ -57,8 +103,12 @@ export default function AuthGateway({ onLoginSuccess, onContinueAsGuest }: AuthG
         }
 
         const userData = userSnap.data();
-        // Since we are using standard password storage as requested ("no hard security")
-        if (userData.password !== password) {
+        
+        // If password is not registered yet (e.g. from guest sync upgrade or blank migration), let's register the current password input!
+        if (!userData.password) {
+          await setDoc(userRef, { password: password }, { merge: true });
+          userData.password = password;
+        } else if (userData.password !== password) {
           setError("Incorrect password. Please verify your password and try again.");
           setLoading(false);
           return;
@@ -255,6 +305,72 @@ export default function AuthGateway({ onLoginSuccess, onContinueAsGuest }: AuthG
           <p>
             Storing your metrics on the cloud allows accessing your challenge data, daily macros, and food charts from any device instantly by logging back in.
           </p>
+        </div>
+
+        {/* Collapsible Registered Accounts Viewer */}
+        <div className="pt-4 border-t border-zinc-900" id="auth-registered-accounts-section">
+          <button
+            type="button"
+            onClick={handleToggleAccounts}
+            className="w-full flex items-center justify-between text-[11px] font-mono text-zinc-400 hover:text-lime-400 transition uppercase tracking-wider py-1.5 px-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 cursor-pointer border border-zinc-900"
+            id="auth-accounts-toggle-btn"
+          >
+            <div className="flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5 text-lime-400" />
+              <span>Registered Accounts ({loadingAccounts ? "..." : accounts.length})</span>
+            </div>
+            {showAccounts ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </button>
+
+          {showAccounts && (
+            <div className="mt-3 space-y-2 max-h-48 overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-800" id="auth-accounts-list-container">
+              {loadingAccounts ? (
+                <div className="flex items-center justify-center py-4 gap-2 text-zinc-500 text-[11px] font-mono">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-lime-400" />
+                  <span>Loading profiles library...</span>
+                </div>
+              ) : accountsError ? (
+                <p className="text-[10px] text-rose-400 bg-rose-500/5 border border-rose-500/10 p-2 rounded-lg font-mono">{accountsError}</p>
+              ) : accounts.length === 0 ? (
+                <p className="text-[10px] text-zinc-500 text-center py-3 font-mono">No accounts created on this cloud database yet.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {accounts.map((acc) => (
+                    <div 
+                      key={acc.username}
+                      className="bg-zinc-900/40 p-2.5 rounded-xl border border-zinc-900 flex items-center justify-between gap-2 hover:border-zinc-850 hover:bg-zinc-900/65 transition text-[11px]"
+                    >
+                      <div className="space-y-0.5 min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-extrabold text-zinc-200 truncate font-mono">{acc.username}</span>
+                          {acc.name && acc.name !== acc.username && (
+                            <span className="text-[9px] text-zinc-500 truncate">({acc.name})</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 text-[9px] text-zinc-500 font-mono">
+                          <span className="bg-zinc-950 px-1 py-0.5 rounded text-[8px] border border-zinc-850/60 flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-lime-400"></span>
+                            <span>Pass: {acc.password || <em className="text-amber-500 font-sans tracking-tight">Not Set (Auto-Claim!)</em>}</span>
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUsername(acc.username);
+                          setPassword(acc.password || '');
+                        }}
+                        className="text-[9px] bg-lime-400/5 hover:bg-lime-405 hover:bg-lime-400/10 active:scale-95 text-lime-400 px-2 py-1 rounded-lg border border-lime-400/20 font-bold uppercase tracking-wider transition cursor-pointer shrink-0"
+                        title="Auto-fill credentials"
+                      >
+                        Auto-fill
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Continuation Options Footer */}
