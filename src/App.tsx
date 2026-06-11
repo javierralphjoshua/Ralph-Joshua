@@ -373,6 +373,91 @@ export default function App() {
     }, 150);
   };
 
+  const migrateOfflineBackup = () => {
+    try {
+      const savedProfile = localStorage.getItem('challenge_profile_v1');
+      const savedLogs = localStorage.getItem('challenge_logs_v1');
+      if (savedProfile) {
+        setProfile(JSON.parse(savedProfile));
+      } else {
+        setProfile(null);
+      }
+      if (savedLogs) {
+        setLogs(JSON.parse(savedLogs));
+      } else {
+        setLogs({});
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const loadUserData = async (user: CustomUser) => {
+    setAuthLoading(true);
+    try {
+      const profileRef = doc(db, 'profiles', user.uid);
+      const profileSnap = await getDoc(profileRef);
+
+      let loadedProfile: UserProfile | null = null;
+      let loadedLogs: Record<string, DailyLog> = {};
+
+      if (profileSnap.exists()) {
+        loadedProfile = profileSnap.data() as UserProfile;
+        
+        const logsRef = collection(db, 'profiles', user.uid, 'logs');
+        const logsSnap = await getDocs(logsRef);
+        logsSnap.forEach((doc) => {
+          loadedLogs[doc.id] = doc.data() as DailyLog;
+        });
+
+        // Store local cache to make sure they are preserved nicely
+        localStorage.setItem('challenge_profile_v1', JSON.stringify(loadedProfile));
+        localStorage.setItem('challenge_logs_v1', JSON.stringify(loadedLogs));
+
+        setProfile(loadedProfile);
+        setLogs(loadedLogs);
+        setToastMessage("Cloud profile downloaded successfully! ☁️");
+      } else {
+        // Migrate guest/local data to cloud if it exists
+        const localProfileStr = localStorage.getItem('challenge_profile_v1');
+        const localLogsStr = localStorage.getItem('challenge_logs_v1');
+
+        if (localProfileStr) {
+          const localProfile = JSON.parse(localProfileStr);
+          const localLogs = localLogsStr ? JSON.parse(localLogsStr) : {};
+
+          const cleanLocalProfile = JSON.parse(JSON.stringify(localProfile));
+          try {
+            await setDoc(doc(db, 'profiles', user.uid), cleanLocalProfile);
+          } catch (err) {
+            handleFirestoreError(err, OperationType.WRITE, `profiles/${user.uid}`);
+          }
+
+          for (const [date, log] of Object.entries(localLogs)) {
+            const cleanLocalLog = JSON.parse(JSON.stringify(log));
+            try {
+              await setDoc(doc(db, 'profiles', user.uid, 'logs', date), cleanLocalLog);
+            } catch (err) {
+              handleFirestoreError(err, OperationType.WRITE, `profiles/${user.uid}/logs/${date}`);
+            }
+          }
+
+          setProfile(localProfile);
+          setLogs(localLogs);
+          setToastMessage("✓ Synced guest challenge metrics to cloud! 🚀");
+        } else {
+          setProfile(null);
+          setLogs({});
+        }
+      }
+    } catch (e) {
+      console.error("Firestore sync error", e);
+      migrateOfflineBackup();
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   // 1. Custom Simplified Session Sync
   useEffect(() => {
     const initSession = async () => {
@@ -381,88 +466,15 @@ export default function App() {
         try {
           const user = JSON.parse(savedSessionStr) as CustomUser;
           setCurrentUser(user);
-          setAuthLoading(true);
-
-          const profileRef = doc(db, 'profiles', user.uid);
-          const profileSnap = await getDoc(profileRef);
-
-          let loadedProfile: UserProfile | null = null;
-          let loadedLogs: Record<string, DailyLog> = {};
-
-          if (profileSnap.exists()) {
-            loadedProfile = profileSnap.data() as UserProfile;
-            
-            const logsRef = collection(db, 'profiles', user.uid, 'logs');
-            const logsSnap = await getDocs(logsRef);
-            logsSnap.forEach((doc) => {
-              loadedLogs[doc.id] = doc.data() as DailyLog;
-            });
-
-            setProfile(loadedProfile);
-            setLogs(loadedLogs);
-            setToastMessage("Cloud profile downloaded successfully! ☁️");
-          } else {
-            // Migrate guest/local data to cloud if it exists
-            const localProfileStr = localStorage.getItem('challenge_profile_v1');
-            const localLogsStr = localStorage.getItem('challenge_logs_v1');
-
-            if (localProfileStr) {
-              const localProfile = JSON.parse(localProfileStr);
-              const localLogs = localLogsStr ? JSON.parse(localLogsStr) : {};
-
-              const cleanLocalProfile = JSON.parse(JSON.stringify(localProfile));
-              try {
-                await setDoc(doc(db, 'profiles', user.uid), cleanLocalProfile);
-              } catch (err) {
-                handleFirestoreError(err, OperationType.WRITE, `profiles/${user.uid}`);
-              }
-
-              for (const [date, log] of Object.entries(localLogs)) {
-                const cleanLocalLog = JSON.parse(JSON.stringify(log));
-                try {
-                  await setDoc(doc(db, 'profiles', user.uid, 'logs', date), cleanLocalLog);
-                } catch (err) {
-                  handleFirestoreError(err, OperationType.WRITE, `profiles/${user.uid}/logs/${date}`);
-                }
-              }
-
-              setProfile(localProfile);
-              setLogs(localLogs);
-              setToastMessage("✓ Synced guest challenge metrics to cloud! 🚀");
-            } else {
-              setProfile(null);
-              setLogs({});
-            }
-          }
+          await loadUserData(user);
         } catch (e) {
-          console.error("Firestore sync error", e);
-          // Hydrate offline backup
-          migrateOfflineBackup();
-        } finally {
+          console.error(e);
           setAuthLoading(false);
+          migrateOfflineBackup();
         }
       } else {
         setAuthLoading(false);
         migrateOfflineBackup();
-      }
-    };
-
-    const migrateOfflineBackup = () => {
-      try {
-        const savedProfile = localStorage.getItem('challenge_profile_v1');
-        const savedLogs = localStorage.getItem('challenge_logs_v1');
-        if (savedProfile) {
-          setProfile(JSON.parse(savedProfile));
-        } else {
-          setProfile(null);
-        }
-        if (savedLogs) {
-          setLogs(JSON.parse(savedLogs));
-        } else {
-          setLogs({});
-        }
-      } catch (e) {
-        console.error(e);
       }
     };
 
@@ -930,10 +942,10 @@ export default function App() {
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
           <AuthGateway 
-            onLoginSuccess={(user) => {
+            onLoginSuccess={async (user) => {
               setCurrentUser(user);
               setGuestMode(false);
-              setToastMessage("✓ Logged in successfully! Cloud state active. ☁️");
+              await loadUserData(user);
             }} 
             onContinueAsGuest={handleContinueAsGuest} 
           />
