@@ -125,6 +125,111 @@ async function generateCaloriesWithRetry(ai: GoogleGenAI, contentsParts: any[]):
   throw lastError || new Error("Failed to generate response after all retry attempts with all models failed.");
 }
 
+// Simple heuristic nutrient estimator fallback when Gemini API limit is exceeded (e.g., 429 Quota Exhausted)
+function estimateHeuristically(input: string): {
+  itemName: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  confidence: number;
+  description: string;
+} {
+  const text = (input || "").toLowerCase().trim();
+  
+  // Local food dictionary for common bodybuilding/fitness foods (standard portion rules)
+  const database = [
+    { keys: ["chicken breast", "chicken breast", "chicken", "manok", "chicken breast fillet"], kcal: 165, p: 31, c: 0, f: 3.6, name: "Chicken Breast", defaultG: 150 },
+    { keys: ["jasmine rice", "white rice", "brown rice", "rice", "kanin"], kcal: 130, p: 2.7, c: 28, f: 0.3, name: "White Rice", defaultG: 200 },
+    { keys: ["egg", "eggs", "itlog", "boiled egg", "fried egg"], kcal: 140, p: 12, c: 1, f: 10, name: "Egg", defaultG: 100 }, // ~2 medium eggs
+    { keys: ["whey", "protein powder", "whey protein", "shake", "scoop"], kcal: 380, p: 80, c: 8, f: 5, name: "Whey Protein", defaultG: 30 }, // ~1 scoop (30g)
+    { keys: ["beef", "baka", "steak", "ground beef", "lean beef"], kcal: 250, p: 26, c: 0, f: 15, name: "Beef", defaultG: 150 },
+    { keys: ["pork", "baboy", "porkchop", "liempo", "pork loin"], kcal: 240, p: 27, c: 0, f: 14, name: "Pork", defaultG: 150 },
+    { keys: ["fish", "isda", "salmon", "tilapia", "tuna", "tuna flakes"], kcal: 185, p: 21, c: 0, f: 9, name: "Fish/Salmon", defaultG: 150 },
+    { keys: ["banana", "saging", "bananas"], kcal: 89, p: 1.1, c: 23, f: 0.3, name: "Banana", defaultG: 120 },
+    { keys: ["apple", "mansanas", "apples"], kcal: 52, p: 0.3, c: 14, f: 0.2, name: "Apple", defaultG: 150 },
+    { keys: ["oats", "oatmeal", "quaker oats", "rolled oats"], kcal: 389, p: 16.9, c: 66, f: 6.9, name: "Oats", defaultG: 50 },
+    { keys: ["bread", "tinapay", "whole wheat bread", "slice", "slices"], kcal: 265, p: 9, c: 49, f: 3.2, name: "Bread/Slices", defaultG: 60 },
+    { keys: ["potato", "patatas", "potatoes", "sweet potato", "kamote"], kcal: 77, p: 2, c: 17, f: 0.1, name: "Potato", defaultG: 150 },
+    { keys: ["milk", "gatas", "fresh milk", "cow milk"], kcal: 50, p: 3.3, c: 4.8, f: 2, name: "Milk", defaultG: 200 },
+    { keys: ["avocado", "abocado"], kcal: 160, p: 2, c: 9, f: 15, name: "Avocado", defaultG: 100 },
+    { keys: ["peanut butter", "peanut butter", "butter"], kcal: 588, p: 25, c: 20, f: 50, name: "Peanut Butter", defaultG: 32 }
+  ];
+
+  let matchedFoods: string[] = [];
+  let totalKcal = 0;
+  let totalP = 0;
+  let totalC = 0;
+  let totalF = 0;
+  let foundAny = false;
+
+  const weightRegex = /(\d+)\s*(?:g|grams?|ml)\b/i;
+
+  // Scan text to identify matches and compute weights
+  database.forEach(item => {
+    let matchedKey: string | null = null;
+    for (const key of item.keys) {
+      if (text.includes(key)) {
+        matchedKey = key;
+        break;
+      }
+    }
+
+    if (matchedKey) {
+      foundAny = true;
+      let weight = item.defaultG;
+
+      // Extract surrounding portion weight (e.g. "150g" or "100 grams")
+      const keywordIdx = text.indexOf(matchedKey);
+      const surroundingText = text.slice(
+        Math.max(0, keywordIdx - 20),
+        Math.min(text.length, keywordIdx + matchedKey.length + 20)
+      );
+      
+      const match = surroundingText.match(weightRegex);
+      if (match) {
+        weight = parseInt(match[1]) || item.defaultG;
+      } else {
+        const globalMatch = text.match(weightRegex);
+        if (globalMatch) {
+          weight = parseInt(globalMatch[1]) || item.defaultG;
+        }
+      }
+
+      const factor = weight / 100;
+      totalKcal += Math.round(item.kcal * factor);
+      totalP += Math.round(item.p * factor);
+      totalC += Math.round(item.c * factor);
+      totalF += Math.round(item.f * factor);
+      
+      matchedFoods.push(`${weight}g ${item.name}`);
+    }
+  });
+
+  if (!foundAny) {
+    // Elegant generic default backup if no database key matches
+    return {
+      itemName: input ? `Custom Entry: ${input}` : "Standard Exercise Meal",
+      calories: 380,
+      protein: 20,
+      carbs: 45,
+      fat: 12,
+      confidence: 0.45,
+      description: "⚠️ Local estimate (Google Gemini API daily free quota limit reached). Assumed standard macronutrient-balanced nutrition profile."
+    };
+  }
+
+  return {
+    itemName: matchedFoods.join(" & "),
+    calories: totalKcal,
+    protein: totalP,
+    carbs: totalC,
+    fat: totalF,
+    confidence: 0.8,
+    description: "⚠️ Local fallback estimate (Google Gemini API free tier limit or rate limit exceeded). Extrapolated: " + matchedFoods.join(", ") + "."
+  };
+}
+
 // Gemini Food Estimation API endpoint
 app.post("/api/estimate-calories", async (req, res) => {
   try {
@@ -170,55 +275,63 @@ app.post("/api/estimate-calories", async (req, res) => {
     
     contentsParts.push({ text: userPrompt });
 
-    // Request structured JSON object using our new robust retry with model-fallback helper
-    const bodyText = await generateCaloriesWithRetry(ai, contentsParts);
-
-    if (!bodyText) {
-      throw new Error("Empty response received from Gemini AI model.");
-    }
-
-    // Robust parsing logic to extract clean JSON
     let parsedEstimate: any = null;
-    const rawText = bodyText.trim();
-    
-    try {
-      parsedEstimate = JSON.parse(rawText);
-    } catch (directError) {
-      console.warn("Direct JSON parsing failed, attempting cleanup extraction:", directError);
-      
-      // Try stripping markdown blocks if they were wrapped
-      let cleanedText = rawText;
-      if (cleanedText.startsWith("```")) {
-        cleanedText = cleanedText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-      }
-      cleanedText = cleanedText.trim();
 
+    try {
+      // Request structured JSON object using our new robust retry with model-fallback helper
+      const bodyText = await generateCaloriesWithRetry(ai, contentsParts);
+
+      if (!bodyText) {
+        throw new Error("Empty response received from Gemini AI model.");
+      }
+
+      // Robust parsing logic to extract clean JSON
+      const rawText = bodyText.trim();
+      
       try {
-        parsedEstimate = JSON.parse(cleanedText);
-      } catch (stripError) {
-        // Find the first '{' and matched '{ }' range if there is surrounding chatter
-        const startIdx = cleanedText.indexOf("{");
-        const endIdx = cleanedText.lastIndexOf("}");
+        parsedEstimate = JSON.parse(rawText);
+      } catch (directError) {
+        console.warn("Direct JSON parsing failed, attempting cleanup extraction:", directError);
         
-        if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-          const jsonSubstring = cleanedText.slice(startIdx, endIdx + 1);
-          try {
-            parsedEstimate = JSON.parse(jsonSubstring);
-          } catch (substringError) {
-            throw new Error(`Failed to parse response substring: ${substringError.message}`);
+        // Try stripping markdown blocks if they were wrapped
+        let cleanedText = rawText;
+        if (cleanedText.startsWith("```")) {
+          cleanedText = cleanedText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        }
+        cleanedText = cleanedText.trim();
+
+        try {
+          parsedEstimate = JSON.parse(cleanedText);
+        } catch (stripError) {
+          // Find the first '{' and matched '{ }' range if there is surrounding chatter
+          const startIdx = cleanedText.indexOf("{");
+          const endIdx = cleanedText.lastIndexOf("}");
+          
+          if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+            const jsonSubstring = cleanedText.slice(startIdx, endIdx + 1);
+            try {
+              parsedEstimate = JSON.parse(jsonSubstring);
+            } catch (substringError) {
+              throw new Error(`Failed to parse response substring: ${substringError.message}`);
+            }
+          } else {
+            throw new Error(`No JSON structured block found in response text: ${cleanedText}`);
           }
-        } else {
-          throw new Error(`No JSON structured block found in response text: ${cleanedText}`);
         }
       }
-    }
 
-    // Standardize object keys to integers for safe calculations
-    if (parsedEstimate) {
-      parsedEstimate.calories = Math.round(Number(parsedEstimate.calories) || 0);
-      parsedEstimate.protein = Math.round(Number(parsedEstimate.protein) || 0);
-      parsedEstimate.carbs = Math.round(Number(parsedEstimate.carbs) || 0);
-      parsedEstimate.fat = Math.round(Number(parsedEstimate.fat) || 0);
+      // Standardize object keys to integers for safe calculations
+      if (parsedEstimate) {
+        parsedEstimate.calories = Math.round(Number(parsedEstimate.calories) || 0);
+        parsedEstimate.protein = Math.round(Number(parsedEstimate.protein) || 0);
+        parsedEstimate.carbs = Math.round(Number(parsedEstimate.carbs) || 0);
+        parsedEstimate.fat = Math.round(Number(parsedEstimate.fat) || 0);
+      }
+    } catch (geminiError: any) {
+      console.warn("[Gemini API Quota Fallback Triggered] Error calling Gemini: ", geminiError);
+      
+      // Safe heuristic fallback for quota errors, internet connection dropouts, or timeouts
+      parsedEstimate = estimateHeuristically(textDescription || "");
     }
 
     return res.json(parsedEstimate);
