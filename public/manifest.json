@@ -1,0 +1,24 @@
+{
+  "short_name": "Active Burn",
+  "name": "30-Day Active Burn & Fat Tracker",
+  "description": "Log ingredients, calculate daily macros, track visual weights, and hit your 30-day fat loss goals.",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512 any",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512 any",
+      "purpose": "maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#000000",
+  "theme_color": "#a3e635",
+  "display": "standalone",
+  "orientation": "portrait"
+}

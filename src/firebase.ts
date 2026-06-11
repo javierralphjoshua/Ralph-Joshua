@@ -1,11 +1,24 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth();
+
+// Enable offline database caching and persistence in browser environments
+if (typeof window !== 'undefined') {
+  enableIndexedDbPersistence(db).catch((err) => {
+    if (err.code === 'failed-precondition') {
+      console.warn('Firestore multi-tab persistence warning: Multiple tabs open, database cache loaded in read-only mode.');
+    } else if (err.code === 'unimplemented') {
+      console.warn('Firestore offline persistence warning: Current browser does not support IndexedDB cache indexing.');
+    } else {
+      console.warn('Firestore persistence warning:', err.message);
+    }
+  });
+}
 
 export enum OperationType {
   CREATE = 'create',
