@@ -214,7 +214,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
       // 1. If client key is available (typical for external builds like Netlify), call the official REST API directly!
       if (clientApiKey) {
         console.log("Configured client key found. Calling Google Gemini API directly (for Netlify/static setups)...");
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${clientApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${clientApiKey}`;
 
         const parts: any[] = [];
         if (base64String && mimeType) {
@@ -238,7 +238,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
           systemInstruction: {
             parts: [
               {
-                text: "You are an expert athletic nutritionist and dietitian. Based on the food text description and/or the uploaded image, deliver a realistic estimation of the food name, total calorie count, and macronutrients (calories, protein, carbs, fat). Be precise.\n\nCRITICAL DIRECTIVE ON USER'S TEXTUAL SPECIFICATIONS:\nYou must HEAVILY PRIORITIZE and strictly respect any written weights, grams, ounces, or exact portion quantities specified in the user's text description (e.g. '100g chicken breast', '250g white jasmine rice'). Use the uploaded image simply as a visual reference/verification aid. Do NOT override the written portion sizes or specifications with generic values based on the image.\n\nSTRICT JSON OUTPUT REQUIREMENT:\nAlways respond with ONLY a clean, raw, valid JSON object matching the requested schema. Do NOT wrap the JSON in markdown code blocks, HTML tags, or any other conversational wrapper text. Start directly with '{' and end with '}'."
+                text: "You are an expert, highly precise nutrition-tracking AI. Your task is to analyze the provided food image and the user's text description to estimate calories and macronutrients accurately.\n\nCore Rules:\n 1. Strict Portion Sizing: Base your estimate strictly on the portion size mentioned in the user's text input.\n 2. Standard Reference: If the user provides a count without a weight (e.g., \"1 egg\", \"1 apple\"), you MUST use standard USDA reference sizes (e.g., 1 Large Egg = ~50g, ~70-72 kcal). NEVER default to 100g unless the user explicitly types \"100g\".\n 3. Text-Primary Verification: Prioritize the user's text description for the actual portion size consumed. Use the image to identify the food items and preparation method, but strictly rely on the text for the quantity. If the image shows 3 eggs but the text says \"1 egg\", you must calculate macros for exactly 1 egg.\n 4. Output: Provide realistic, research-backed estimates for Calories, Protein (g), Carbohydrates (g), and Fat (g).\n\nSTRICT JSON OUTPUT REQUIREMENT:\nAlways respond with ONLY a clean, raw, valid JSON object matching the requested schema. Do NOT wrap the JSON in markdown code blocks, HTML tags, or any other conversational wrapper text. Start directly with '{' and end with '}'."
               }
             ]
           },
