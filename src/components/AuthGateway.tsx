@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { doc, getDoc, setDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { 
   Shield, 
@@ -13,7 +13,8 @@ import {
   Database,
   ChevronDown,
   ChevronUp,
-  RefreshCw
+  RefreshCw,
+  Trash2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -33,6 +34,37 @@ export default function AuthGateway({ onLoginSuccess, onContinueAsGuest }: AuthG
   const [accounts, setAccounts] = useState<any[]>([]);
   const [loadingAccounts, setLoadingAccounts] = useState(false);
   const [accountsError, setAccountsError] = useState<string | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteAccount = async (targetUser: string) => {
+    setIsDeleting(true);
+    try {
+      // 1. Delete all subcoll logs
+      const logsRef = collection(db, 'profiles', targetUser, 'logs');
+      const logsSnap = await getDocs(logsRef);
+      for (const logDoc of logsSnap.docs) {
+        await deleteDoc(doc(db, 'profiles', targetUser, 'logs', logDoc.id));
+      }
+      // 2. Delete main doc
+      await deleteDoc(doc(db, 'profiles', targetUser));
+      
+      // Update our list
+      await fetchAccounts();
+      
+      // Clear current form if matched
+      if (username.trim().toLowerCase() === targetUser.toLowerCase()) {
+        setUsername('');
+        setPassword('');
+      }
+      setDeletingAccount(null);
+    } catch (err: any) {
+      console.error("Failed to delete account:", err);
+      setError("Failed to purge account data. " + err.message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const fetchAccounts = async () => {
     setLoadingAccounts(true);
@@ -354,17 +386,49 @@ export default function AuthGateway({ onLoginSuccess, onContinueAsGuest }: AuthG
                           </span>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setUsername(acc.username);
-                          setPassword(acc.password || '');
-                        }}
-                        className="text-[9px] bg-lime-400/5 hover:bg-lime-405 hover:bg-lime-400/10 active:scale-95 text-lime-400 px-2 py-1 rounded-lg border border-lime-400/20 font-bold uppercase tracking-wider transition cursor-pointer shrink-0"
-                        title="Auto-fill credentials"
-                      >
-                        Auto-fill
-                      </button>
+                      {deletingAccount === acc.username ? (
+                        <div className="flex items-center gap-1.5 shrink-0 bg-rose-950/15 border border-rose-500/20 px-2 py-1 rounded-xl">
+                          <span className="text-[9px] text-rose-300 font-bold uppercase">Purge?</span>
+                          <button
+                            type="button"
+                            disabled={isDeleting}
+                            onClick={() => handleDeleteAccount(acc.username)}
+                            className="text-[9px] bg-rose-550 bg-rose-600 hover:bg-rose-500 text-white font-extrabold px-2 py-0.5 rounded-lg transition"
+                          >
+                            {isDeleting ? "..." : "YES"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isDeleting}
+                            onClick={() => setDeletingAccount(null)}
+                            className="text-[9px] bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold px-2 py-0.5 rounded-lg transition"
+                          >
+                            NO
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUsername(acc.username);
+                              setPassword(acc.password || '');
+                            }}
+                            className="text-[9px] bg-lime-400/5 hover:bg-lime-405 hover:bg-lime-400/10 active:scale-95 text-lime-400 px-2 py-1 rounded-lg border border-lime-400/20 font-bold uppercase tracking-wider transition cursor-pointer shrink-0"
+                            title="Auto-fill credentials"
+                          >
+                            Auto-fill
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDeletingAccount(acc.username)}
+                            className="p-1 px-1.5 bg-zinc-950/40 hover:bg-rose-500/10 text-zinc-500 hover:text-rose-400 rounded-lg border border-zinc-900 hover:border-rose-500/20 transition cursor-pointer shrink-0"
+                            title="Delete this account"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

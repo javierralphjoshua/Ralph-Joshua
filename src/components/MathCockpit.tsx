@@ -132,9 +132,13 @@ export default function MathCockpit({ profile, stats, logs, onReset, onOpenSetti
 
             <div className="flex items-center justify-between gap-4">
               <div>
-                {/* Large Neon Green Weight Metric */}
+                {/* Large Neon/Red Weight Metric */}
                 <div className="flex items-baseline gap-1.5 font-mono">
-                  <span className="text-4xl sm:text-5xl font-extrabold text-[#a3e635] tracking-tight drop-shadow-[0_0_12px_rgba(163,230,53,0.45)]">
+                  <span className={`text-4xl sm:text-5xl font-extrabold tracking-tight transition-colors duration-350 ${
+                    fatLossValue < 0 
+                      ? 'text-rose-400 drop-shadow-[0_0_12px_rgba(244,63,94,0.45)]' 
+                      : 'text-[#a3e635] drop-shadow-[0_0_12px_rgba(163,230,53,0.45)]'
+                  }`}>
                     {fatLossValue?.toFixed(2)}
                   </span>
                   <span className="text-zinc-400 text-xs font-sans font-black tracking-widest">LBS</span>
@@ -246,10 +250,12 @@ export default function MathCockpit({ profile, stats, logs, onReset, onOpenSetti
                     <span className="text-[8.5px] font-black uppercase tracking-wider text-zinc-500">CUMULATIVE DEFICIT</span>
                   </div>
                   <div className="flex items-baseline gap-0.5 mt-2 font-mono">
-                    <span className="text-xl sm:text-2xl font-black text-white">
+                    <span className={`text-xl sm:text-2xl font-black ${
+                      cumulativeDeficitValue < 0 ? 'text-rose-455 text-rose-400' : 'text-white'
+                    }`}>
                       {cumulativeDeficitValue.toLocaleString()}
                     </span>
-                    <span className="text-[8.5px] font-bold text-zinc-500 uppercase">kcal</span>
+                    <span className="text-[8.5px] font-bold text-zinc-550 uppercase">kcal</span>
                   </div>
                 </div>
 
@@ -274,7 +280,11 @@ export default function MathCockpit({ profile, stats, logs, onReset, onOpenSetti
                     <span className="text-[8.5px] font-black uppercase tracking-wider text-zinc-500">DAILY AVG DEFICIT</span>
                   </div>
                   <div className="flex items-baseline gap-0.5 mt-2 font-mono">
-                    <span className="text-xl sm:text-2xl font-black text-[#a3e635] drop-shadow-[0_0_8px_rgba(163,230,53,0.3)]">
+                    <span className={`text-xl sm:text-2xl font-black drop-shadow-[0_0_8px_rgba(163,230,53,0.3)] ${
+                      dailyAvgDeficitValue < 0 
+                        ? 'text-rose-400 drop-shadow-[0_0_8px_rgba(244,63,94,0.3)]' 
+                        : 'text-[#a3e635]'
+                    }`}>
                       {dailyAvgDeficitValue.toLocaleString()}
                     </span>
                     <span className="text-[8.5px] font-bold text-zinc-500 uppercase">kcal</span>
