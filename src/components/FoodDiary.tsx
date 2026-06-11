@@ -214,7 +214,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
       // 1. If client key is available (typical for external builds like Netlify), call the official REST API directly!
       if (clientApiKey) {
         console.log("Configured client key found. Calling Google Gemini API directly (for Netlify/static setups)...");
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${clientApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key=${clientApiKey}`;
 
         const parts: any[] = [];
         if (base64String && mimeType) {
