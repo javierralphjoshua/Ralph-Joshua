@@ -179,7 +179,7 @@ function renderTransformationCard(profile: UserProfile, stats: any, callback: (d
     ctx.textAlign = 'center';
     ctx.fillStyle = '#a3e635';
     ctx.font = '900 32px "Inter", sans-serif';
-    ctx.fillText('30-DAY METABOLIC RECOMPOSITION', canvas.width / 2, 70);
+    ctx.fillText("RAGNAR'S 30 DAYS CHALLENGE", canvas.width / 2, 70);
 
     ctx.fillStyle = '#ffffff';
     ctx.font = '700 24px "Inter", sans-serif';
@@ -1440,14 +1440,12 @@ export default function App() {
                     let borderClass = 'border-zinc-800 bg-zinc-950/40 hover:border-zinc-700';
                     let textClass = 'text-zinc-500';
                     let badgeNode: React.ReactNode = null;
-
                     let ratingIndicator = null;
-                    if (isSelected) {
-                      borderClass = 'border-lime-400 bg-lime-400/5 ring-1 ring-lime-400/30';
-                      textClass = 'text-white font-bold';
-                    } else if (isLogged) {
+
+                    // First set default/logged state text and indicator properties
+                    if (isLogged) {
                       const netDeficit = deficit >= 0;
-                      borderClass = netDeficit ? 'border-lime-500 bg-lime-500/5' : 'border-rose-500/50 bg-rose-500/5';
+                      borderClass = netDeficit ? 'border-lime-500/50 bg-lime-500/5' : 'border-rose-500/40 bg-rose-500/5';
                       textClass = 'text-zinc-300 font-medium';
                       badgeNode = (
                         <span className={`text-[8.5px] font-mono block leading-none font-bold mt-1 ${netDeficit ? "text-lime-400" : "text-rose-400"}`}>
@@ -1463,6 +1461,12 @@ export default function App() {
                       } else if (ratingVal === 'failed') {
                         ratingIndicator = <span className="text-[10px]" title="Failed">⚠️</span>;
                       }
+                    }
+
+                    // Then apply the blue selection outline over the layout, keeping the inner details visible
+                    if (isSelected) {
+                      borderClass = 'border-sky-500 bg-sky-950/15 ring-2 ring-sky-500/40';
+                      textClass = 'text-white font-extrabold';
                     }
 
                     return (
@@ -2399,13 +2403,17 @@ export default function App() {
               className="bg-zinc-950 border border-zinc-800 rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl my-8 space-y-6"
             >
               <div className="flex items-center justify-between border-b border-zinc-850 pb-4">
-                <div className="flex items-center gap-2">
-                  <div className="bg-lime-950/30 text-lime-400 p-2 rounded-xl border border-lime-500/10">
-                    <Share2 className="w-5 h-5" />
+                <div className="flex items-center space-x-3">
+                  <div className="bg-lime-400 p-2 rounded-xl text-zinc-950 font-black shadow-[0_0_15px_rgba(163,230,53,0.3)] flex items-center justify-center">
+                    <Zap className="w-5 h-5 fill-zinc-950 stroke-zinc-950 stroke-[3]" />
                   </div>
                   <div>
-                    <span className="text-[10px] font-black uppercase tracking-wider text-lime-400">Your 30-Day transformation</span>
-                    <h3 className="text-base font-black text-white uppercase tracking-wider">SHARE TRANSFORMATION REPORT</h3>
+                    <h3 className="text-base font-extrabold tracking-widest text-[#a3e635] uppercase leading-none">
+                      Ragnar’s 30 Days Challenge
+                    </h3>
+                    <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">
+                      Your 30-Day Transformation Report
+                    </span>
                   </div>
                 </div>
                 <button
@@ -2437,14 +2445,14 @@ export default function App() {
                 </div>
 
                 {/* Download and Share Controls */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
                   <a
                     href={generatedReportImage}
                     download={`transformation-report-${profile?.name.replace(/\s+/g, '-').toLowerCase() || 'victory'}.jpg`}
-                    className="bg-lime-400 hover:bg-lime-300 text-zinc-950 font-black py-3 px-4 rounded-xl text-xs uppercase tracking-wider transition text-center flex items-center justify-center gap-2 shadow-lg shadow-lime-400/10 cursor-pointer"
+                    className="bg-lime-400 hover:bg-lime-300 text-zinc-950 font-black py-3 px-4 rounded-xl text-[10px] uppercase tracking-wider transition text-center flex items-center justify-center gap-1.5 shadow-lg shadow-lime-400/10 cursor-pointer"
                   >
-                    <Download className="w-4 h-4" />
-                    <span>Download Image File</span>
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download Poster</span>
                   </a>
 
                   <button
@@ -2458,10 +2466,18 @@ export default function App() {
                           setToastMessage("Plaintext copy failed");
                         });
                     }}
-                    className="bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-white font-bold py-3 px-4 rounded-xl text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 font-mono cursor-pointer"
+                    className="bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-300 hover:text-white font-bold py-3 px-4 rounded-xl text-[10px] uppercase tracking-wider transition flex items-center justify-center gap-1.5 font-mono cursor-pointer"
                   >
-                    <Copy className="w-4 h-4" />
-                    <span>Copy Text Summary</span>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy Text</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowTransformationModal(false)}
+                    className="bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white font-bold py-3 px-4 rounded-xl text-[10px] uppercase tracking-wider transition flex items-center justify-center gap-1.5 cursor-pointer font-sans"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Exit Preview</span>
                   </button>
                 </div>
 

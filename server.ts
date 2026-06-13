@@ -40,9 +40,9 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", apiKeyAvailable: !!apiKey });
 });
 
-// Helper function to query Gemini with retry exponential backoff and model fallbacks (e.g. gemini-1.5-flash-002, gemini-flash-latest)
+// Helper function to query Gemini with retry exponential backoff and model fallbacks (e.g. gemini-3.5-flash, gemini-flash-latest)
 async function generateCaloriesWithRetry(ai: GoogleGenAI, contentsParts: any[]): Promise<string> {
-  const modelsToTry = ["gemini-1.5-flash-002", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  const modelsToTry = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-2.5-flash"];
   const maxRetriesPerModel = 2;
   const initialDelayMs = 1200;
   let lastError: any = null;
@@ -55,7 +55,7 @@ async function generateCaloriesWithRetry(ai: GoogleGenAI, contentsParts: any[]):
           model: modelName,
           contents: { parts: contentsParts },
           config: {
-            systemInstruction: "You are an expert, highly precise nutrition-tracking AI. Your task is to analyze the provided food image and the user's text description to estimate calories and macronutrients accurately.\n\nCore Rules:\n 1. Strict Portion Sizing: Base your estimate strictly on the portion size mentioned in the user's text input.\n 2. Standard Reference: If the user provides a count without a weight (e.g., \"1 egg\", \"1 apple\"), you MUST use standard USDA reference sizes (e.g., 1 Large Egg = ~50g, ~70-72 kcal). NEVER default to 100g unless the user explicitly types \"100g\".\n 3. Text-Primary Verification: Prioritize the user's text description for the actual portion size consumed. Use the image to identify the food items and preparation method, but strictly rely on the text for the quantity. If the image shows 3 eggs but the text says \"1 egg\", you must calculate macros for exactly 1 egg.\n 4. Output: Provide realistic, research-backed estimates for Calories, Protein (g), Carbohydrates (g), and Fat (g).\n\nSTRICT JSON OUTPUT REQUIREMENT:\nAlways respond with ONLY a clean, raw, valid JSON object matching the requested schema. Do NOT wrap the JSON in markdown code blocks, HTML tags, or any other conversational wrapper text. Start directly with '{' and end with '}'.",
+            systemInstruction: "You are an expert, highly precise nutrition-tracking AI. Your task is to analyze the provided food image and the user's text description to estimate calories and macronutrients accurately.\n\nCore Rules:\n 1. Strict Portion Sizing: Base your estimate strictly on the portion size mentioned in the user's text input.\n 2. Detailed Itemized Breakdown in Description: In the 'description' field, you MUST provide a clear, itemized line-by-line bullet-point breakdown of each identified food item, its estimated portion size, estimated calories, and estimated protein content (e.g.,\n - 2 Scrambled Eggs: 140 kcal | 12g Protein\n - 1 slice Whole Wheat Toast: 80 kcal | 3g Protein\n\nAssumptions: Calculated based on standard portion weights with 30g toast. Adjust values below if needed!).\n 3. Standard Reference: If the user provides a count without a weight (e.g., \"1 egg\", \"1 apple\"), you MUST use standard USDA reference sizes (e.g., 1 Large Egg = ~50g, ~70-72 kcal). NEVER default to 100g unless the user explicitly types \"100g\".\n 4. Text-Primary Verification: Prioritize the user's text description for the actual portion size consumed. Use the image to identify the food items and preparation method, but rely on the text for the quantity.\n 5. Output: Provide realistic, research-backed estimates for Calories, Protein (g), Carbohydrates (g), and Fat (g) representing the sum of all identified items.\n\nSTRICT JSON OUTPUT REQUIREMENT:\nAlways respond with ONLY a clean, raw, valid JSON object matching the requested schema. Do NOT wrap the JSON in markdown code blocks, HTML tags, or any other conversational wrapper text. Start directly with '{' and end with '}'..",
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -66,19 +66,19 @@ async function generateCaloriesWithRetry(ai: GoogleGenAI, contentsParts: any[]):
                 },
                 calories: {
                   type: Type.INTEGER,
-                  description: "Estimated total calories in kcal."
+                  description: "Estimated sum of total calories in kcal of all food items identified."
                 },
                 protein: {
                   type: Type.INTEGER,
-                  description: "Estimated protein content in grams."
+                  description: "Estimated sum of total protein content in grams."
                 },
                 carbs: {
                   type: Type.INTEGER,
-                  description: "Estimated carbohydrates in grams."
+                  description: "Estimated sum of total carbohydrates in grams."
                 },
                 fat: {
                   type: Type.INTEGER,
-                  description: "Estimated total fat in grams."
+                  description: "Estimated sum of total fat in grams."
                 },
                 confidence: {
                   type: Type.NUMBER,
@@ -86,7 +86,7 @@ async function generateCaloriesWithRetry(ai: GoogleGenAI, contentsParts: any[]):
                 },
                 description: {
                   type: Type.STRING,
-                  description: "A brief 2-sentence explanation of how the estimate was generated, highlighting the main ingredients detected."
+                  description: "A clear, itemized line-by-line bullet-point breakdown of each identified food item, portion size, calories, and protein content, followed by assumption explanation."
                 }
               },
               required: ["itemName", "calories", "protein", "carbs", "fat", "confidence", "description"]

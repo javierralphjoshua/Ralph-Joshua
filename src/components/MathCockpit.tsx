@@ -112,8 +112,10 @@ export default function MathCockpit({ profile, stats, logs, onReset, onOpenSetti
               style={{ width: `${(currentDay / 30) * 100}%` }}
             ></div>
           </div>
-          <span className="font-mono text-white text-xs bg-zinc-900 px-2.5 py-0.5 rounded border border-zinc-850">
-            Day {currentDay}/30
+          <span className="font-mono text-white text-xs bg-zinc-900 px-2.5 py-0.5 rounded border border-zinc-850 flex items-center gap-1.5">
+            <span>Day {currentDay}/30</span>
+            <span className="text-zinc-650">•</span>
+            <span className="text-lime-400 font-bold">{Math.round((currentDay / 30) * 100)}% Completed</span>
           </span>
         </div>
 
@@ -405,49 +407,7 @@ export default function MathCockpit({ profile, stats, logs, onReset, onOpenSetti
 
         </div>
 
-        {/* 30-Day Grid Calendar Progress Map (Bottom Section) */}
-        <div className="bg-gradient-to-b from-zinc-950 to-[#0e0d11] border border-zinc-900 rounded-2xl p-4 sm:p-5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.02)] space-y-3.5">
-          <div className="flex justify-between items-center">
-            <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block font-sans">
-              CHALLENGE CHRONO PROGRESS MAP (Day 1 - {currentDay} Checked)
-            </span>
-            <span className="text-[9px] font-mono text-zinc-500 bg-zinc-900 border border-zinc-850 px-2.5 py-0.5 rounded font-black uppercase tracking-wider">
-              30 LOCK BLOCKS
-            </span>
-          </div>
 
-          {/* 30 block grid */}
-          <div className="grid grid-cols-5 sm:grid-cols-6 md:grid-cols-10 gap-2">
-            {Array.from({ length: 30 }).map((_, i) => {
-              const dayNumber = i + 1;
-              const isCompleted = dayNumber <= currentDay;
-              const isCurrent = dayNumber === currentDay;
-
-              let cellStyle = 'bg-zinc-950 border border-zinc-900 text-zinc-600 hover:border-zinc-800';
-              if (isCompleted) {
-                cellStyle = 'bg-lime-950/20 border border-lime-400/35 text-lime-400 shadow-[0_0_6px_rgba(163,230,53,0.15)] font-bold';
-              }
-              if (isCurrent) {
-                cellStyle += ' ring-2 ring-lime-400/50 animate-pulse';
-              }
-
-              return (
-                <div
-                  key={dayNumber}
-                  className={`aspect-square rounded-xl flex flex-col items-center justify-center text-[10px] font-mono select-none transition-all ${cellStyle}`}
-                  title={`Day ${dayNumber} tracking status`}
-                >
-                  <span className="font-mono text-xs font-bold">{dayNumber}</span>
-                  {isCompleted ? (
-                    <span className="text-[8px] leading-none mt-0.5 text-[#a3e635]">✔</span>
-                  ) : (
-                    <span className="text-[7px] text-zinc-700 mt-0.5">⌛</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
 
       </div>
 

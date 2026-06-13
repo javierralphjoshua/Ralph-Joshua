@@ -365,6 +365,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
     ];
 
     let matchedFoods: string[] = [];
+    let matchedFoodsBreakdown: string[] = [];
     let totalKcal = 0;
     let totalP = 0;
     let totalC = 0;
@@ -461,8 +462,10 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
           }
         }
 
-        totalKcal += Math.round(chosenMacros.kcal * quantity);
-        totalP += Math.round(chosenMacros.p * quantity);
+        const itemKcal = Math.round(chosenMacros.kcal * quantity);
+        const itemP = Math.round(chosenMacros.p * quantity);
+        totalKcal += itemKcal;
+        totalP += itemP;
         totalC += Math.round(chosenMacros.c * quantity);
         totalF += Math.round(chosenMacros.f * quantity);
 
@@ -483,6 +486,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
         }
 
         matchedFoods.push(`${portionLabel} ${displayItemName}`);
+        matchedFoodsBreakdown.push(`- ${portionLabel || "1 portion"} ${displayItemName}: ${itemKcal} kcal | ${itemP}g Protein`);
         textToSearch = textToSearch.replace(matchedKey, "MATCHED_TOKEN");
       }
     });
@@ -500,6 +504,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
     }
 
     const finalName = matchedFoods.join(" & ");
+    const breakdownText = matchedFoodsBreakdown.join("\n");
     return {
       itemName: finalName,
       calories: totalKcal,
@@ -507,11 +512,11 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
       carbs: totalC,
       fat: totalF,
       confidence: 0.8,
-      description: "⚡ Fallback matched successfully (offline fallback DB active): " + finalName + ". Edit below if needed!"
+      description: `⚡ Local matcher found ingredients successfully (offline backup DB active):\n${breakdownText}\n\nAssumptions: Estimated based on standard portion templates. You can adjust the totals below!`
     };
   };
 
-  // call server-side Gemini estimator or direct client-side Gemini API on client-only setups (like Netlify)
+  // call server-side Gemini estimator
   const handleAiEstimate = async () => {
     if (!aiPrompt.trim() && !imageFile) {
       setAiError('Please enter a description or upload a food photo first.');
@@ -522,137 +527,17 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
     setAiError(null);
     setAiResult(null);
 
-    const clientApiKey = (import.meta as any).env.VITE_GEMINI_API_KEY;
-
     try {
       let base64String = '';
       let mimeType = '';
 
       if (imageFile) {
         base64String = await fileToBase64(imageFile);
-        // Base64 string from FileReader often starts with data:image/png;base64, which needs to be removed for the official REST payload
-        if (base64String.includes('base64,')) {
-          base64String = base64String.split('base64,')[1];
-        }
         mimeType = imageFile.type;
       }
 
-      // 1. If client key is available (typical for external builds like Netlify), call the official REST API directly!
-      if (clientApiKey) {
-        console.log("Configured client key found. Calling Google Gemini API directly (for Netlify/static setups)...");
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-002:generateContent?key=${clientApiKey}`;
-
-        const parts: any[] = [];
-        if (base64String && mimeType) {
-          parts.push({
-            inlineData: {
-              mimeType: mimeType,
-              data: base64String
-            }
-          });
-        }
-        parts.push({
-          text: aiPrompt.trim()
-        });
-
-        const bodyPayload = {
-          contents: [
-            {
-              parts: parts
-            }
-          ],
-          systemInstruction: {
-            parts: [
-              {
-                text: "You are an expert, highly precise nutrition-tracking AI. Your task is to analyze the provided food image and the user's text description to estimate calories and macronutrients accurately.\n\nCore Rules:\n 1. Strict Portion Sizing: Base your estimate strictly on the portion size mentioned in the user's text input.\n 2. Standard Reference: If the user provides a count without a weight (e.g., \"1 egg\", \"1 apple\"), you MUST use standard USDA reference sizes (e.g., 1 Large Egg = ~50g, ~70-72 kcal). NEVER default to 100g unless the user explicitly types \"100g\".\n 3. Text-Primary Verification: Prioritize the user's text description for the actual portion size consumed. Use the image to identify the food items and preparation method, but strictly rely on the text for the quantity. If the image shows 3 eggs but the text says \"1 egg\", you must calculate macros for exactly 1 egg.\n 4. Output: Provide realistic, research-backed estimates for Calories, Protein (g), Carbohydrates (g), and Fat (g).\n\nSTRICT JSON OUTPUT REQUIREMENT:\nAlways respond with ONLY a clean, raw, valid JSON object matching the requested schema. Do NOT wrap the JSON in markdown code blocks, HTML tags, or any other conversational wrapper text. Start directly with '{' and end with '}'."
-              }
-            ]
-          },
-          generationConfig: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: {
-                itemName: {
-                  type: "STRING",
-                  description: "A short, clean, descriptive name of the food item or combined dish analyzed."
-                },
-                calories: {
-                  type: "INTEGER",
-                  description: "Estimated total calories in kcal."
-                },
-                protein: {
-                  type: "INTEGER",
-                  description: "Estimated protein content in grams."
-                },
-                carbs: {
-                  type: "INTEGER",
-                  description: "Estimated carbohydrates in grams."
-                },
-                fat: {
-                  type: "INTEGER",
-                  description: "Estimated total fat in grams."
-                },
-                confidence: {
-                  type: "NUMBER",
-                  description: "Nutritionist confidence score from 0.0 to 1.0 based on description specificity or image quality."
-                },
-                description: {
-                  type: "STRING",
-                  description: "A brief 2-sentence explanation of how the estimate was generated, highlighting the main ingredients detected."
-                }
-              },
-              required: ["itemName", "calories", "protein", "carbs", "fat", "confidence", "description"]
-            }
-          }
-        };
-
-        const directResponse = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify(bodyPayload)
-        });
-
-        if (!directResponse.ok) {
-          const errText = await directResponse.text();
-          throw new Error(`Gemini official API returned status ${directResponse.status}: ${errText}`);
-        }
-
-        const directData = await directResponse.json();
-        const rawText = directData.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!rawText) {
-          throw new Error("No response content candidate received from direct Gemini call.");
-        }
-
-        let parsedEstimate: any = null;
-        const trimmed = rawText.trim();
-        try {
-          parsedEstimate = JSON.parse(trimmed);
-        } catch (parseErr) {
-          let cleaned = trimmed;
-          if (cleaned.startsWith("```")) {
-            cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-          }
-          cleaned = cleaned.trim();
-          parsedEstimate = JSON.parse(cleaned);
-        }
-
-        if (parsedEstimate) {
-          parsedEstimate.calories = Math.round(Number(parsedEstimate.calories) || 0);
-          parsedEstimate.protein = Math.round(Number(parsedEstimate.protein) || 0);
-          parsedEstimate.carbs = Math.round(Number(parsedEstimate.carbs) || 0);
-          parsedEstimate.fat = Math.round(Number(parsedEstimate.fat) || 0);
-        }
-
-        setAiResult(parsedEstimate);
-        return;
-      }
-
-      // 2. Otherwise/Fallback: Attempt backend server-side proxy route
-      console.log("No direct VITE_GEMINI_API_KEY configured. Attempting standard Express proxy...");
-      const localBase64 = imageFile ? await fileToBase64(imageFile) : '';
+      // Route all queries safely and cleanly through the server-side proxy
+      console.log("Calling standard Express proxy for food calorie estimation...");
       const response = await fetch('/api/estimate-calories', {
         method: 'POST',
         headers: {
@@ -660,7 +545,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
         },
         body: JSON.stringify({
           textDescription: aiPrompt.trim(),
-          imageData: localBase64 || undefined,
+          imageData: base64String || undefined,
           imageMimeType: mimeType || undefined,
         }),
       });
@@ -1004,12 +889,14 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
                           className="bg-zinc-900 border border-lime-500/20 p-4 rounded-xl space-y-4"
                         >
                           <div>
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-lime-400 flex items-center gap-1 mb-2">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-lime-400 flex items-center gap-1 mb-2.5">
                               <Sparkles className="w-3 h-3 text-lime-400" />
                               <span>Gemini AI Estimation</span>
                             </span>
-                            <p className="text-[10px] text-zinc-400 leading-relaxed italic mb-1">{aiResult.description}</p>
-                            <span className="text-[9px] text-zinc-500 italic block">✏️ You can manually adjust the values below before logging!</span>
+                            <div className="bg-zinc-950 p-3.5 rounded-xl border border-zinc-800 text-xs text-zinc-300 leading-relaxed whitespace-pre-line mb-3 max-h-[180px] overflow-y-auto font-sans">
+                              {aiResult.description}
+                            </div>
+                            <span className="text-[10px] text-zinc-400 italic block mb-1">✏️ You can manually adjust the values below before logging!</span>
                           </div>
 
                           {/* Editable Meal Name & Calories */}
@@ -1020,7 +907,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
                                 type="text"
                                 value={aiResult.itemName}
                                 onChange={(e) => setAiResult({ ...aiResult, itemName: e.target.value })}
-                                className="w-full bg-zinc-950 border border-zinc-805 text-xs text-white font-bold rounded-lg px-2.5 py-1.5 focus:border-lime-400 focus:outline-none transition font-sans"
+                                className="w-full bg-zinc-950 border border-zinc-800 text-xs text-white font-bold rounded-lg px-2.5 py-1.5 focus:border-lime-400 focus:outline-none transition font-sans"
                               />
                             </div>
                             <div>
@@ -1030,7 +917,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
                                 min="0"
                                 value={aiResult.calories}
                                 onChange={(e) => setAiResult({ ...aiResult, calories: parseInt(e.target.value) || 0 })}
-                                className="w-full bg-zinc-950 border border-zinc-805 text-xs text-lime-400 font-extrabold text-center font-mono rounded-lg px-2 py-1.5 focus:border-lime-400 focus:outline-none transition"
+                                className="w-full bg-zinc-950 border border-zinc-800 text-xs text-lime-400 font-extrabold text-center font-mono rounded-lg px-2 py-1.5 focus:border-lime-400 focus:outline-none transition"
                               />
                             </div>
                           </div>
@@ -1046,7 +933,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
                                   min="0"
                                   value={aiResult.protein}
                                   onChange={(e) => setAiResult({ ...aiResult, protein: parseInt(e.target.value) || 0 })}
-                                  className="w-full bg-zinc-900 border border-zinc-805 focus:border-lime-500 rounded-md py-1 text-center text-white font-mono text-xs focus:outline-none"
+                                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-lime-500 rounded-md py-1 text-center text-white font-mono text-xs focus:outline-none"
                                 />
                               </div>
                               <div>
@@ -1056,7 +943,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
                                   min="0"
                                   value={aiResult.carbs}
                                   onChange={(e) => setAiResult({ ...aiResult, carbs: parseInt(e.target.value) || 0 })}
-                                  className="w-full bg-zinc-900 border border-zinc-805 focus:border-lime-500 rounded-md py-1 text-center text-white font-mono text-xs focus:outline-none"
+                                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-lime-500 rounded-md py-1 text-center text-white font-mono text-xs focus:outline-none"
                                 />
                               </div>
                               <div>
@@ -1066,7 +953,7 @@ export default function FoodDiary({ foodItems, onAddFood, onRemoveFood, isComple
                                   min="0"
                                   value={aiResult.fat}
                                   onChange={(e) => setAiResult({ ...aiResult, fat: parseInt(e.target.value) || 0 })}
-                                  className="w-full bg-zinc-900 border border-zinc-805 focus:border-lime-500 rounded-md py-1 text-center text-white font-mono text-xs focus:outline-none"
+                                  className="w-full bg-zinc-900 border border-zinc-800 focus:border-lime-500 rounded-md py-1 text-center text-white font-mono text-xs focus:outline-none"
                                 />
                               </div>
                             </div>
